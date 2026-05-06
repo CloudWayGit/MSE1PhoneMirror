@@ -2040,6 +2040,12 @@ void Renderer::draw_pin_overlay() {
                                            36, 220, 220, 220,
                                            &pin_label_w_, &pin_label_h_);
     }
+    if (!pin_note_tex_) {
+        pin_note_tex_ = make_text_texture(sdl_renderer_,
+                                          "Note: PIN pairing is experimental and may not work on all devices.",
+                                          14, 170, 170, 170,
+                                          &pin_note_w_, &pin_note_h_);
+    }
     if (pin != pin_digits_cached_) {
         if (pin_digits_tex_) { SDL_DestroyTexture(pin_digits_tex_); pin_digits_tex_ = nullptr; }
         // Letter-spaced for readability ("1 2 3 4")
@@ -2055,8 +2061,8 @@ void Renderer::draw_pin_overlay() {
     }
 
     // Centered card with semi-transparent dark backdrop.
-    int card_w = std::max(420, pin_digits_w_ + 120);
-    int card_h = pin_label_h_ + pin_digits_h_ + 80;
+    int card_w = std::max(420, std::max(pin_digits_w_, pin_note_w_) + 80);
+    int card_h = pin_label_h_ + pin_digits_h_ + pin_note_h_ + 96;
     int card_x = (win_w - card_w) / 2;
     int card_y = (win_h - card_h) / 2;
 
@@ -2089,6 +2095,13 @@ void Renderer::draw_pin_overlay() {
                         card_y + 18 + pin_label_h_ + 12,
                         pin_digits_w_, pin_digits_h_};
         SDL_RenderCopy(sdl_renderer_, pin_digits_tex_, nullptr, &dst);
+    }
+    // Footnote.
+    if (pin_note_tex_) {
+        SDL_Rect dst = {card_x + (card_w - pin_note_w_) / 2,
+                        card_y + 18 + pin_label_h_ + 12 + pin_digits_h_ + 16,
+                        pin_note_w_, pin_note_h_};
+        SDL_RenderCopy(sdl_renderer_, pin_note_tex_, nullptr, &dst);
     }
 }
 

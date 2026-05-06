@@ -466,10 +466,13 @@ network::RtspResponse AirPlayServer::handle_pair_setup_pin(const network::RtspRe
             return resp;
         }
 
-        // SRP username "I" is hardcoded to "Pair-Setup" per AirPlay 1 spec
-        // (matches shairport-sync / RPiPlay). The "user" bplist field is
-        // device metadata (MAC/UUID), NOT the SRP I.
-        if (!srp_pin_.start(current_pin_)) {
+        // SRP username "I" is the CLIENT-supplied "user" field (iPad's own
+        // device-id, e.g. its MAC). iOS computes x = H(s | H(I | ":" | PIN))
+        // using this same I, so the server MUST use the value the client sent.
+        // (Confirmed by UxPlay/raop_handler_pairsetup_pin reference.)
+        const std::string& srp_username = user;
+        std::cout << "[AirPlay] SRP I (username) = " << srp_username << "\n";
+        if (!srp_pin_.start(current_pin_, srp_username)) {
             std::cerr << "[AirPlay] SRP start failed\n";
             resp.status_code = 500;
             return resp;
@@ -481,8 +484,9 @@ network::RtspResponse AirPlayServer::handle_pair_setup_pin(const network::RtspRe
 
         BPlistWriter w;
         std::vector<std::pair<int, int>> root;
-        root.push_back({w.add_string("salt"), w.add_data(salt.data(), salt.size())});
+        // Order matches UxPlay: pk first, then salt.
         root.push_back({w.add_string("pk"),   w.add_data(B.data(),    B.size())});
+        root.push_back({w.add_string("salt"), w.add_data(salt.data(), salt.size())});
         resp.body = w.build(w.add_dict(root));
 
         std::cout << "[AirPlay] pair-setup-pin step 1 → salt(" << salt.size()

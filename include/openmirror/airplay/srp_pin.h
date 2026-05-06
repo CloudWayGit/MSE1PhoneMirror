@@ -58,6 +58,11 @@ private:
     bool authenticated_ = false;
 };
 
+// Self-test: runs the philippe44 RAOP-Player auth_protocol.html test vector
+// (client-side) and verifies our M1/K calculations match the published values.
+// Prints all intermediate hashes to stderr. Returns true on full match.
+bool srp_pin_self_test();
+
 // Decrypt the encrypted LTPK payload (epk + authTag) sent by the client
 // in pair-setup-pin step 3, using AES-128-CBC with key/IV derived from K.
 // Returns the 32-byte client Ed25519 public key on success.

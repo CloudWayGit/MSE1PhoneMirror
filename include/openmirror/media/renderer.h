@@ -180,6 +180,8 @@ private:
     SDL_Texture* pin_digits_tex_ = nullptr;
     int pin_digits_w_ = 0, pin_digits_h_ = 0;
     std::string pin_digits_cached_;
+    SDL_Texture* pin_note_tex_ = nullptr;
+    int pin_note_w_ = 0, pin_note_h_ = 0;
     void draw_pin_overlay();
 
     std::string screenshot_dir_;

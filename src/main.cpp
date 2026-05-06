@@ -2,6 +2,7 @@
 #include <openmirror/config.h>
 #include <openmirror/log_buffer.h>
 #include <openmirror/network/tcp_server.h>
+#include <openmirror/airplay/srp_pin.h>
 #include <iostream>
 #include <string>
 
@@ -190,6 +191,9 @@ int main(int argc, char* argv[]) {
             config.enable_miracast = false;
         } else if (arg == "--airplay-pin") {
             config.airplay_require_pin = true;
+        } else if (arg == "--srp-self-test") {
+            bool ok = openmirror::airplay::srp_pin_self_test();
+            return ok ? 0 : 2;
         } else {
             std::cerr << "Unknown option: " << arg << "\n";
             print_usage(argv[0]);

@@ -475,7 +475,8 @@ MdnsService::MdnsService() : impl_(new Impl) {}
 MdnsService::~MdnsService() { unregister(); delete impl_; }
 
 bool MdnsService::register_airplay(const std::string& server_name, uint16_t port,
-                                     const uint8_t hw_addr[6]) {
+                                     const uint8_t hw_addr[6],
+                                     bool require_pin) {
     std::string device_id = mac_to_string(hw_addr);
     std::string mac_id = mac_to_id(hw_addr);
 
@@ -494,7 +495,7 @@ bool MdnsService::register_airplay(const std::string& server_name, uint16_t port
         auto airplay_txt = build_txt_payload({
             {"deviceid", device_id},
             {"features", "0x5A7FFEE6"},
-            {"flags", "0x4"},
+            {"flags", require_pin ? "0x44" : "0x4"},
             {"model", "AppleTV3,2"},
             {"pi", "2e388006-13ba-4041-9a67-25dd4a43d536"},
             {"pk", "b07727d6f6cd6e08b58ede525ec3cdeaa252ad9f683feb212ef8a205246554e7"},
@@ -519,7 +520,8 @@ bool MdnsService::register_airplay(const std::string& server_name, uint16_t port
                 {"am", "AppleTV3,2"}, {"ch", "2"}, {"cn", "0,1,2,3"}, {"da", "true"},
                 {"et", "0,3,5"}, {"ft", "0x5A7FFEE6"}, {"md", "0,1,2"},
                 {"pk", "b07727d6f6cd6e08b58ede525ec3cdeaa252ad9f683feb212ef8a205246554e7"},
-                {"pw", "false"}, {"rhd", "5.6.0.0"}, {"sf", "0x4"},
+                {"pw", require_pin ? "true" : "false"}, {"rhd", "5.6.0.0"},
+                {"sf", require_pin ? "0x44" : "0x4"},
                 {"sr", "44100"}, {"ss", "16"}, {"sv", "false"}, {"tp", "UDP"},
                 {"txtvers", "1"}, {"vn", "65537"}, {"vs", "220.68"}, {"vv", "2"},
             });
@@ -567,7 +569,7 @@ bool MdnsService::register_airplay(const std::string& server_name, uint16_t port
     impl_->airplay_txt = build_txt_payload({
         {"deviceid", device_id},
         {"features", "0x5A7FFEE6"},
-        {"flags", "0x4"},
+        {"flags", require_pin ? "0x44" : "0x4"},
         {"model", "AppleTV3,2"},
         {"pi", "2e388006-13ba-4041-9a67-25dd4a43d536"},
         {"pk", "b07727d6f6cd6e08b58ede525ec3cdeaa252ad9f683feb212ef8a205246554e7"},
@@ -579,7 +581,8 @@ bool MdnsService::register_airplay(const std::string& server_name, uint16_t port
         {"am", "AppleTV3,2"}, {"ch", "2"}, {"cn", "0,1,2,3"}, {"da", "true"},
         {"et", "0,3,5"}, {"ft", "0x5A7FFEE6"}, {"md", "0,1,2"},
         {"pk", "b07727d6f6cd6e08b58ede525ec3cdeaa252ad9f683feb212ef8a205246554e7"},
-        {"pw", "false"}, {"rhd", "5.6.0.0"}, {"sf", "0x4"},
+        {"pw", require_pin ? "true" : "false"}, {"rhd", "5.6.0.0"},
+        {"sf", require_pin ? "0x44" : "0x4"},
         {"sr", "44100"}, {"ss", "16"}, {"sv", "false"}, {"tp", "UDP"},
         {"txtvers", "1"}, {"vn", "65537"}, {"vs", "220.68"}, {"vv", "2"},
     });

@@ -60,6 +60,7 @@ if(ENABLE_AIRPLAY)
         src/airplay/mdns_service.cpp
         src/airplay/airplay_mirror.cpp
         src/airplay/pairing.cpp
+        src/airplay/srp_pin.cpp
         src/airplay/bplist.cpp
         src/airplay/mirror_buffer.cpp
         lib/playfair/playfair.c

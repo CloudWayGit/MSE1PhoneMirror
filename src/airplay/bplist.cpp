@@ -196,6 +196,17 @@ bool BPlistReader::has_key(const std::string& key) const {
     return false;
 }
 
+bool BPlistReader::get_string(const std::string& key, std::string& out) const {
+    auto dict = read_dict(root_object_);
+    for (size_t i = 0; i < dict.key_refs.size(); i++) {
+        if (read_string_object(dict.key_refs[i]) == key) {
+            out = read_string_object(dict.val_refs[i]);
+            return !out.empty();
+        }
+    }
+    return false;
+}
+
 bool BPlistReader::get_streams(std::vector<StreamInfo>& out) const {
     auto root = read_dict(root_object_);
     for (size_t i = 0; i < root.key_refs.size(); i++) {

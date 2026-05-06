@@ -1,0 +1,368 @@
+[Miracast] WiFi Direct aborted (error=0)
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+========================================
+  1PhoneMirror by MSEndpointMgr v0.2.0
+========================================
+
+[Renderer] Logo loaded: 1772x1772
+[PhoneFrame] Generated 410x876 frame for 390x844 screen (bezels: 10/16/16, corner: 42)
+[Renderer] Window initialized
+[Audio] Initialized: 44100Hz, 2ch
+[Decoder] Video decoder initialized: h264
+[Decoder] Audio decoder initialized: aac
+[TCP] Listening on port 7000
+[AirPlay] Event listener on port 51771
+[AirPlay] Timing (NTP) listener on port 51057
+[TCP] Listening on port 7100
+[mDNS] Local IP: 192.168.10.212
+[mDNS] Bonjour service found, using dnssd.dll
+[mDNS] AirPlay advertised as '1PhoneMirror by MSEndpointMgr' on port 7000 (Bonjour)
+[AirPlay] Server started: 1PhoneMirror by MSEndpointMgr (port 7000)
+[App] AirPlay receiver active (iOS)
+[Miracast] Started as '1PhoneMirror by MSEndpointMgr' (WiFi Direct WFD sink)
+[Miracast] RTSP port 7236, RTP port 51058
+[Miracast] No 'Projecting to this PC' setting required
+[App] Miracast receiver active (Android)
+[Cast] Certificate fingerprint: F8:20:68:BC:AC:A2:D3:11:C6:2D:72:66:77:BA:BC:8A:C4:1B:3D:1E:6B:F6:92:2D:EA:0D:95:ED:E8:8C:FD:28
+[Cast] Advertised as '1PhoneMirror by MSEndpointMgr' on port 8009 (_googlecast._tcp, Bonjour)
+[Cast] Receiver started as '1PhoneMirror by MSEndpointMgr' on port 8009
+[Cast] Android devices can now cast to this PC
+[App] Google Cast receiver active (Android)
+
+[App] Ready. Waiting for connections...
+  Press F for fullscreen, P to toggle phone frame,
+  Ctrl+S to screenshot, ESC to quit.
+
+[Cast] TCP connection from 192.168.10.91:62489
+[Cast] TLS ClientHello: version=3.1 record_len=1765 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.91:50587
+[Cast] TLS ClientHello: version=3.1 record_len=1669 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.212:57226
+[Cast] TLS ClientHello: version=3.1 record_len=1701 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.212:54145
+[Cast] TLS ClientHello: version=3.1 record_len=1701 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.126:59069
+[Cast] TLS ClientHello: version=3.1 record_len=512 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_CHACHA20_POLY1305_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from remote-0df7d970ac5b33ec3a94162be7abb487-51 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.91:50589
+[Cast] TLS ClientHello: version=3.1 record_len=1701 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.91:50590
+[Cast] TLS ClientHello: version=3.1 record_len=1669 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.126:53093
+[Cast] TLS ClientHello: version=3.1 record_len=512 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TCP connection from 192.168.10.91:51953
+[Cast] TLS handshake done: TLSv1.3 TLS_CHACHA20_POLY1305_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from remote-0df7d970ac5b33ec3a94162be7abb487-51 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TLS ClientHello: version=3.1 record_len=1669 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.91:51954
+[Cast] TLS ClientHello: version=3.1 record_len=1669 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.91:56891
+[Cast] TLS ClientHello: version=3.1 record_len=1765 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.91:60368
+[Cast] TLS ClientHello: version=3.1 record_len=1669 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.212:59614
+[Cast] TLS ClientHello: version=3.1 record_len=1765 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.212:61486
+[Cast] TLS ClientHello: version=3.1 record_len=1733 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.126:60117
+[Cast] TLS ClientHello: version=3.1 record_len=512 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_CHACHA20_POLY1305_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from remote-0df7d970ac5b33ec3a94162be7abb487-51 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.126:50519
+[Cast] TLS ClientHello: version=3.1 record_len=512 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_CHACHA20_POLY1305_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from remote-0df7d970ac5b33ec3a94162be7abb487-51 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.212:54371
+[Cast] TLS ClientHello: version=3.1 record_len=1765 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.91:49849
+[Cast] TLS ClientHello: version=3.1 record_len=1669 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.91:62618
+[Cast] TLS ClientHello: version=3.1 record_len=1765 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TCP connection from 192.168.10.91:62619
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TLS ClientHello: version=3.1 record_len=1733 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.91:62620
+[Cast] TLS ClientHello: version=3.1 record_len=1765 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.212:55811
+[Cast] TLS ClientHello: version=3.1 record_len=1701 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[TCP] Client connected: 192.168.10.205:49214
+[RTSP] Session started with 192.168.10.205:49214
+[RTSP] GET /info CSeq=0
+[AirPlay] Info request from client (1147 bytes bplist)
+[RTSP] POST /pair-pin-start CSeq=1
+[AirPlay] /pair-pin-start ΓÇö PIN = 8997
+[RTSP] Client disconnected: 192.168.10.205:49214
+[Cast] TCP connection from 192.168.10.212:64418
+[Cast] TLS ClientHello: version=3.1 record_len=1701 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.91:60438
+[Cast] TLS ClientHello: version=3.1 record_len=1733 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.91:57053
+[Cast] TLS ClientHello: version=3.1 record_len=1701 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.91:57054
+[Cast] TLS ClientHello: version=3.1 record_len=1669 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.91:54498
+[Cast] TLS ClientHello: version=3.1 record_len=1765 hs_type=1 hs_version=3.3
+[Cast] TLS handshake started
+[Cast] TLS handshake done: TLSv1.3 TLS_AES_128_GCM_SHA256
+[Cast] TLS client connected
+[Cast] urn:x-cast:com.google.cast.tp.deviceauth from sender-0 ΓåÆ receiver-0
+[Cast] Auth challenge received (22 bytes)
+[Cast]   Nonce=16B sig_algo=0 hash_algo=1
+[Cast] Auth response sent (cert=781B, sig=256B, nonce=16B)
+[Cast] TLS alert write: fatal / decode error
+[Cast] Client disconnected
+[Cast] TCP connection from 192.168.10.212:53708
+[Cast] recv header failed: SSL_read=0 SSL_error=1 error:0A000126:SSL routines::unexpected eof while reading
+[Cast

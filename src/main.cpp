@@ -100,6 +100,7 @@ void print_usage(const char* argv0) {
               << "  --height <pixels>  Window height (default: 720)\n"
               << "  --no-airplay       Disable AirPlay (iOS) receiver\n"
               << "  --no-miracast      Disable Miracast (Android) receiver\n"
+              << "  --airplay-pin      Require on-screen PIN for AirPlay (managed iOS)\n"
               << "  --help             Show this help\n";
 }
 
@@ -132,6 +133,8 @@ int main(int argc, char* argv[]) {
             config.enable_airplay = false;
         } else if (arg == "--no-miracast") {
             config.enable_miracast = false;
+        } else if (arg == "--airplay-pin") {
+            config.airplay_require_pin = true;
         } else {
             std::cerr << "Unknown option: " << arg << "\n";
             print_usage(argv[0]);

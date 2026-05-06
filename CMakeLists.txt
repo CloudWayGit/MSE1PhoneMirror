@@ -130,7 +130,7 @@ if(WIN32)
     target_compile_definitions(1PhoneMirror PRIVATE NOMINMAX)
     # Embed app manifest for DPI awareness (disable auto-generated manifest to avoid duplicate)
     target_sources(1PhoneMirror PRIVATE resources/openmirror.rc)
-    set_target_properties(1PhoneMirror PROPERTIES LINK_FLAGS "/MANIFEST:NO /SUBSYSTEM:CONSOLE /ENTRY:mainCRTStartup")
+    set_target_properties(1PhoneMirror PROPERTIES LINK_FLAGS "/MANIFEST:NO /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
 endif()
 
 # --- Install ---

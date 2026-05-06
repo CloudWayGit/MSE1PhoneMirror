@@ -430,24 +430,6 @@ network::RtspResponse AirPlayServer::handle_pair_setup_pin(const network::RtspRe
         resp.status_code = 400;
         return resp;
     }
-    // List well-known keys we recognize, plus a hex dump of the body so we
-    // can confirm exactly what iOS sent.
-    {
-        const char* probe[] = {"method","user","pk","proof","epk","authTag",
-                               "publicKey","clientPublicKey","sessionID",
-                               "salt","password","pin","state"};
-        std::cerr << "[AirPlay] pair-setup-pin keys:";
-        for (auto k : probe) if (r.has_key(k)) std::cerr << " " << k;
-        std::cerr << "  (body=" << req.body.size() << "B)" << std::endl;
-        std::cerr << "[AirPlay] body hex:";
-        size_t n = std::min<size_t>(96, req.body.size());
-        for (size_t i = 0; i < n; i++) {
-            char hb[4]; std::snprintf(hb, 4, "%02x", req.body[i]);
-            std::cerr << (i % 32 == 0 ? "\n  " : " ") << hb;
-        }
-        std::cerr << std::endl;
-    }
-
     // Serialize the entire SRP/PIN state machine — RTSP runs each client on
     // its own thread, and srp_pin_ holds non-thread-safe BIGNUM state.
     std::lock_guard<std::mutex> lk(pin_mutex_);
@@ -469,9 +451,7 @@ network::RtspResponse AirPlayServer::handle_pair_setup_pin(const network::RtspRe
         // SRP username "I" is the CLIENT-supplied "user" field (iPad's own
         // device-id, e.g. its MAC). iOS computes x = H(s | H(I | ":" | PIN))
         // using this same I, so the server MUST use the value the client sent.
-        // (Confirmed by UxPlay/raop_handler_pairsetup_pin reference.)
         const std::string& srp_username = user;
-        std::cout << "[AirPlay] SRP I (username) = " << srp_username << "\n";
         if (!srp_pin_.start(current_pin_, srp_username)) {
             std::cerr << "[AirPlay] SRP start failed\n";
             resp.status_code = 500;

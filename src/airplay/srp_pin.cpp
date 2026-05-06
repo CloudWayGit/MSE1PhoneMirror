@@ -7,8 +7,6 @@
 
 #include <cstring>
 #include <iostream>
-#include <algorithm>
-#include <cctype>
 
 namespace openmirror::airplay {
 
@@ -124,7 +122,6 @@ struct SrpPinServer::Impl {
     std::vector<uint8_t> M2;
     std::vector<uint8_t> K;     // 40-byte interleaved session key
     std::string username = "Pair-Setup";
-    std::string pin;            // saved for brute-force diagnostic on M1 fail
     bool ready = false;
 
     Impl() {
@@ -154,7 +151,6 @@ bool SrpPinServer::start(const std::string& pin, const std::string& username) {
     impl_->M2.clear();
     impl_->K.clear();
     impl_->username = username.empty() ? "Pair-Setup" : username;
-    impl_->pin = pin;
 
     if (!BN_hex2bn(&impl_->N, kRFC5054_Group14_N_hex)) return false;
     if (!BN_set_word(impl_->g, 2)) return false;
@@ -236,22 +232,19 @@ std::vector<uint8_t> SrpPinServer::get_B() const {
 
 bool SrpPinServer::process_client_pubkey(const std::vector<uint8_t>& A,
                                          const std::vector<uint8_t>& M1) {
-    std::cerr << "[SRP] step2 enter A=" << A.size() << " M1=" << M1.size()
-              << " ready=" << impl_->ready << std::endl;
     if (!impl_->ready || A.size() != kModBytes || M1.size() != kHashBytes)
         return false;
 
     if (!BN_bin2bn(A.data(), (int)A.size(), impl_->A)) return false;
-    // Cache the exact wire bytes for M1 hashing — must match what client used.
     impl_->A_wire.assign(A.begin(), A.end());
 
     // Reject A ≡ 0 (mod N).
     BIGNUM* tmp = BN_new();
     BN_mod(tmp, impl_->A, impl_->N, impl_->ctx);
-    if (BN_is_zero(tmp)) { BN_free(tmp); std::cerr << "[SRP] A==0\n"; return false; }
+    if (BN_is_zero(tmp)) { BN_free(tmp); return false; }
     BN_free(tmp);
 
-    // u = SHA1(PAD(A) || PAD(B))  — RFC 5054 padded form
+    // u = SHA1(PAD(A) || PAD(B))
     BIGNUM* u;
     {
         std::vector<uint8_t> ub;
@@ -261,7 +254,6 @@ bool SrpPinServer::process_client_pubkey(const std::vector<uint8_t>& A,
         u = BN_bin2bn(uh.data(), (int)uh.size(), nullptr);
         if (!u) return false;
     }
-    std::cerr << "[SRP] u computed" << std::endl;
 
     // S = (A * v^u) ^ b mod N
     BIGNUM* vu = BN_new();
@@ -271,17 +263,13 @@ bool SrpPinServer::process_client_pubkey(const std::vector<uint8_t>& A,
               BN_mul(avu, impl_->A, vu, impl_->ctx) &&
               BN_mod_exp(S, avu, impl_->b, impl_->N, impl_->ctx);
     BN_free(vu); BN_free(avu); BN_free(u);
-    if (!ok) { BN_free(S); std::cerr << "[SRP] mod_exp failed\n"; return false; }
-    std::cerr << "[SRP] S computed (BN bytes=" << BN_num_bytes(S) << ")" << std::endl;
+    if (!ok) { BN_free(S); return false; }
 
     // K = SHA1(S||0x00000000) || SHA1(S||0x00000001) — Apple variant, 40 bytes.
     impl_->K = apple_session_key(S);
     BN_free(S);
-    std::cerr << "[SRP] K=" << impl_->K.size() << "B" << std::endl;
 
     // M1' = SHA1( SHA1(N) XOR SHA1(g) | SHA1(I) | s | PAD(A) | PAD(B) | K )
-    // per philippe44 RAOP-Player auth_protocol.html.  s stays in BN form (16 B
-    // here because we forced MSB!=0 in start()), A and B are zero-padded to 256.
     auto hN = sha1_bn(impl_->N);
     auto hg = sha1_bn(impl_->g);
     std::vector<uint8_t> hNg(kHashBytes);
@@ -298,192 +286,12 @@ bool SrpPinServer::process_client_pubkey(const std::vector<uint8_t>& A,
     append_pad(m1_buf, impl_->B);
     m1_buf.insert(m1_buf.end(), impl_->K.begin(), impl_->K.end());
     auto M1_calc = sha1(m1_buf);
-    std::cerr << "[SRP] M1_calc computed (m1_buf=" << m1_buf.size() << "B)" << std::endl;
 
     if (CRYPTO_memcmp(M1_calc.data(), M1.data(), kHashBytes) != 0) {
         std::cerr << "[SRP] Client M1 proof mismatch (wrong PIN?)" << std::endl;
-        // ===== expanded brute-force probe =====
-        // Vary independently:
-        //   user  : MAC (4 cases) + "Pair-Setup" + ""  (6 users)
-        //   pin   : ascii / utf16-le / u16be / u16le / u32be / u32le  (6 pins)
-        //   x_fmt : 0=H(s|H(I:P)), 1=H(s|H(P)), 2=H(s|H(:P)), 3=H(P), 4=H(s|P), 5=H(I|s|P)
-        //   K_fmt : 0=apple 00||01, 1=apple 01||00, 2=H(S) only, 3=H(PAD(S))
-        //   k_fmt : 0=H(N|PAD(g)), 1=H(N|g)         (affects only B; we leave B alone, but
-        //                                            iPad's u may use H(PAD(A)|PAD(B)) either way,
-        //                                            and M1 uses our actual B bytes — so k variant
-        //                                            doesn't change M1 here.  Skip.)
-        //   M1_fmt: 0=H(NxorG|hI|s|PAD(A)|PAD(B)|K) (philippe44/csrp)
-        //           1=H(NxorG|hI|s|A_raw|B_raw|K)   (csrp BN form)
-        //           2=H(NxorG|hI|s|PAD(A)|PAD(B))   (no K — RFC 5054)
-        //           3=H(s|PAD(A)|PAD(B)|K)           (Apple iTunes variant)
-        //           4=H(NxorG|s|PAD(A)|PAD(B)|K)    (no I)
-        std::string mac = impl_->username;
-        std::string mac_lo = mac; for (auto& c : mac_lo) c = (char)std::tolower((unsigned char)c);
-        std::string mac_nc = mac; mac_nc.erase(std::remove(mac_nc.begin(), mac_nc.end(), ':'), mac_nc.end());
-        std::string mac_nclo = mac_lo; mac_nclo.erase(std::remove(mac_nclo.begin(), mac_nclo.end(), ':'), mac_nclo.end());
-        std::vector<std::string> users = { mac, mac_lo, mac_nc, mac_nclo, std::string("Pair-Setup"), std::string() };
-
-        std::vector<std::pair<std::string, std::vector<uint8_t>>> pins;
-        pins.push_back({"ascii", std::vector<uint8_t>(impl_->pin.begin(), impl_->pin.end())});
-        int pv = 0; try { pv = std::stoi(impl_->pin); } catch(...) {}
-        pins.push_back({"u16-be", {(uint8_t)((pv>>8)&0xff),(uint8_t)(pv&0xff)}});
-        pins.push_back({"u16-le", {(uint8_t)(pv&0xff),(uint8_t)((pv>>8)&0xff)}});
-        pins.push_back({"u32-be", {(uint8_t)((pv>>24)&0xff),(uint8_t)((pv>>16)&0xff),(uint8_t)((pv>>8)&0xff),(uint8_t)(pv&0xff)}});
-        pins.push_back({"u32-le", {(uint8_t)(pv&0xff),(uint8_t)((pv>>8)&0xff),(uint8_t)((pv>>16)&0xff),(uint8_t)((pv>>24)&0xff)}});
-        std::vector<uint8_t> u16; for (char c : impl_->pin) { u16.push_back((uint8_t)c); u16.push_back(0); }
-        pins.push_back({"utf16-le", u16});
-
-        // u (RFC 5054 padded form)
-        std::vector<uint8_t> ub2;
-        append_pad(ub2, impl_->A);
-        append_pad(ub2, impl_->B);
-        auto uh2 = sha1(ub2);
-        BIGNUM* uu = BN_bin2bn(uh2.data(), (int)uh2.size(), nullptr);
-
-        // S depends only on x (and fixed A,b,v=g^x). Cache S per x.
-        auto compute_S = [&](const BIGNUM* xx)->BIGNUM* {
-            BIGNUM* vv = BN_new(); BN_mod_exp(vv, impl_->g, xx, impl_->N, impl_->ctx);
-            BIGNUM* vu = BN_new(); BN_mod_exp(vu, vv, uu, impl_->N, impl_->ctx);
-            BIGNUM* avu = BN_new(); BN_mul(avu, impl_->A, vu, impl_->ctx);
-            BIGNUM* Sn = BN_new(); BN_mod_exp(Sn, avu, impl_->b, impl_->N, impl_->ctx);
-            BN_free(vv); BN_free(vu); BN_free(avu);
-            return Sn;
-        };
-
-        // K variants
-        auto K_apple_swap = [&](const BIGNUM* S)->std::vector<uint8_t> {
-            // SHA1(S|01) || SHA1(S|00) — reversed interleave order
-            std::vector<uint8_t> sb(BN_num_bytes(S));
-            BN_bn2bin(S, sb.data());
-            std::vector<uint8_t> b1 = sb; b1.insert(b1.end(), {0,0,0,1});
-            std::vector<uint8_t> b0 = sb; b0.insert(b0.end(), {0,0,0,0});
-            auto h1 = sha1(b1); auto h0 = sha1(b0);
-            std::vector<uint8_t> out; out.insert(out.end(), h1.begin(), h1.end());
-            out.insert(out.end(), h0.begin(), h0.end());
-            return out;
-        };
-        auto K_single = [&](const BIGNUM* S)->std::vector<uint8_t> {
-            std::vector<uint8_t> sb(BN_num_bytes(S)); BN_bn2bin(S, sb.data());
-            return sha1(sb);
-        };
-        auto K_padded = [&](const BIGNUM* S)->std::vector<uint8_t> {
-            std::vector<uint8_t> sb; append_pad(sb, S);
-            return sha1(sb);
-        };
-
-        bool found = false;
-        for (size_t ui = 0; ui < users.size() && !found; ++ui) {
-            const auto& un = users[ui];
-            for (size_t pi = 0; pi < pins.size() && !found; ++pi) {
-                const auto& pp = pins[pi];
-                for (int xfmt = 0; xfmt < 6 && !found; ++xfmt) {
-                    // Build x according to xfmt
-                    std::vector<uint8_t> xbuf;
-                    if (xfmt == 0) {
-                        // SHA1(s | SHA1(I ":" P))
-                        std::vector<uint8_t> ip(un.begin(), un.end()); ip.push_back(':');
-                        ip.insert(ip.end(), pp.second.begin(), pp.second.end());
-                        auto iph = sha1(ip);
-                        append_bn_raw(xbuf, impl_->s);
-                        xbuf.insert(xbuf.end(), iph.begin(), iph.end());
-                    } else if (xfmt == 1) {
-                        // SHA1(s | SHA1(P))
-                        auto ph = sha1(pp.second);
-                        append_bn_raw(xbuf, impl_->s);
-                        xbuf.insert(xbuf.end(), ph.begin(), ph.end());
-                    } else if (xfmt == 2) {
-                        // SHA1(s | SHA1(":" P))   (empty user with colon)
-                        std::vector<uint8_t> cp; cp.push_back(':');
-                        cp.insert(cp.end(), pp.second.begin(), pp.second.end());
-                        auto ph = sha1(cp);
-                        append_bn_raw(xbuf, impl_->s);
-                        xbuf.insert(xbuf.end(), ph.begin(), ph.end());
-                    } else if (xfmt == 3) {
-                        // SHA1(P)  no salt at all
-                        xbuf.insert(xbuf.end(), pp.second.begin(), pp.second.end());
-                    } else if (xfmt == 4) {
-                        // SHA1(s | P)  raw pin no inner hash
-                        append_bn_raw(xbuf, impl_->s);
-                        xbuf.insert(xbuf.end(), pp.second.begin(), pp.second.end());
-                    } else { // 5
-                        // SHA1(I | s | P)
-                        xbuf.insert(xbuf.end(), un.begin(), un.end());
-                        append_bn_raw(xbuf, impl_->s);
-                        xbuf.insert(xbuf.end(), pp.second.begin(), pp.second.end());
-                    }
-                    auto xh = sha1(xbuf);
-                    BIGNUM* xx = BN_bin2bn(xh.data(), (int)xh.size(), nullptr);
-                    BIGNUM* Sn = compute_S(xx);
-
-                    std::vector<std::pair<std::string, std::vector<uint8_t>>> Ks = {
-                        {"apple01", apple_session_key(Sn)},
-                        {"appleSWAP", K_apple_swap(Sn)},
-                        {"H(S)", K_single(Sn)},
-                        {"H(PAD(S))", K_padded(Sn)},
-                    };
-
-                    std::vector<uint8_t> hI_un_in(un.begin(), un.end());
-                    auto hI_un = sha1(hI_un_in);
-
-                    for (auto& Kp : Ks) {
-                        const auto& Kn = Kp.second;
-                        for (int mfmt = 0; mfmt < 5 && !found; ++mfmt) {
-                            std::vector<uint8_t> mb;
-                            if (mfmt == 0) {
-                                mb.insert(mb.end(), hNg.begin(), hNg.end());
-                                mb.insert(mb.end(), hI_un.begin(), hI_un.end());
-                                append_bn_raw(mb, impl_->s);
-                                append_pad(mb, impl_->A);
-                                append_pad(mb, impl_->B);
-                                mb.insert(mb.end(), Kn.begin(), Kn.end());
-                            } else if (mfmt == 1) {
-                                mb.insert(mb.end(), hNg.begin(), hNg.end());
-                                mb.insert(mb.end(), hI_un.begin(), hI_un.end());
-                                append_bn_raw(mb, impl_->s);
-                                append_bn_raw(mb, impl_->A);
-                                append_bn_raw(mb, impl_->B);
-                                mb.insert(mb.end(), Kn.begin(), Kn.end());
-                            } else if (mfmt == 2) {
-                                // No K — RFC 5054 client M1
-                                mb.insert(mb.end(), hNg.begin(), hNg.end());
-                                mb.insert(mb.end(), hI_un.begin(), hI_un.end());
-                                append_bn_raw(mb, impl_->s);
-                                append_pad(mb, impl_->A);
-                                append_pad(mb, impl_->B);
-                            } else if (mfmt == 3) {
-                                // SHA1(s | PAD(A) | PAD(B) | K) — Apple iTunes variant
-                                append_bn_raw(mb, impl_->s);
-                                append_pad(mb, impl_->A);
-                                append_pad(mb, impl_->B);
-                                mb.insert(mb.end(), Kn.begin(), Kn.end());
-                            } else { // 4
-                                // No I
-                                mb.insert(mb.end(), hNg.begin(), hNg.end());
-                                append_bn_raw(mb, impl_->s);
-                                append_pad(mb, impl_->A);
-                                append_pad(mb, impl_->B);
-                                mb.insert(mb.end(), Kn.begin(), Kn.end());
-                            }
-                            auto Mn = sha1(mb);
-                            if (CRYPTO_memcmp(Mn.data(), M1.data(), kHashBytes) == 0) {
-                                std::cerr << "[SRP-PROBE] *** MATCH ***  user=\"" << un
-                                          << "\" pin=" << pp.first
-                                          << " xfmt=" << xfmt
-                                          << " Kfmt=" << Kp.first
-                                          << " Mfmt=" << mfmt << std::endl;
-                                found = true;
-                            }
-                        }
-                    }
-                    BN_free(xx); BN_free(Sn);
-                }
-            }
-        }
-        if (!found) std::cerr << "[SRP-PROBE] no variant matched (tried " 
-                              << users.size()*pins.size()*6*4*5 << " combos)" << std::endl;
-        BN_free(uu);
         return false;
     }
+
 
     // H_AMK (M2) = SHA1( PAD(A) | M1 | K )  per philippe44.
     std::vector<uint8_t> m2_buf;
@@ -493,7 +301,6 @@ bool SrpPinServer::process_client_pubkey(const std::vector<uint8_t>& A,
     impl_->M2 = sha1(m2_buf);
 
     authenticated_ = true;
-    std::cerr << "[SRP] authenticated, M2=" << impl_->M2.size() << "B" << std::endl;
     return true;
 }
 

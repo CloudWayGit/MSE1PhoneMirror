@@ -222,7 +222,10 @@ $wixVersion = (& $wix.Source --version) -replace '[^\d.].*$',''
 $wixMinor = ($wixVersion -split '\.')[0..1] -join '.'
 $extVersion = if ($wixMinor) { "$wixMinor.*" } else { '5.*' }
 foreach ($ext in @('WixToolset.Firewall.wixext', 'WixToolset.UI.wixext')) {
-    & $wix.Source extension add -g "$ext/$extVersion" 2>&1 | Out-Null
+    $out = & $wix.Source extension add -g "$ext/$extVersion" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "wix extension add $ext failed:`n$out"
+    }
 }
 
 # ---------- 6. Build the MSI ----------

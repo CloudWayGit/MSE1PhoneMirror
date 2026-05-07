@@ -1,5 +1,6 @@
 #include <openmirror/app.h>
 #include <openmirror/config.h>
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -105,17 +106,39 @@ bool App::init(const Config& config) {
                     out.push_back(std::move(e));
                 }
 #endif
+                // Order by connection time: append new IDs in the order
+                // they first appear, drop IDs that have gone away.
+                std::lock_guard lk(source_order_mutex_);
+                {
+                    std::vector<std::string> live;
+                    for (auto& e : out) live.push_back(e.id);
+                    source_order_.erase(
+                        std::remove_if(source_order_.begin(), source_order_.end(),
+                            [&](const std::string& id) {
+                                return std::find(live.begin(), live.end(), id) == live.end();
+                            }),
+                        source_order_.end());
+                    for (auto& id : live)
+                        if (std::find(source_order_.begin(), source_order_.end(), id) == source_order_.end())
+                            source_order_.push_back(id);
+                }
+                std::sort(out.begin(), out.end(),
+                    [this](const media::Renderer::SourceEntry& a,
+                           const media::Renderer::SourceEntry& b) {
+                        auto ai = std::find(source_order_.begin(), source_order_.end(), a.id);
+                        auto bi = std::find(source_order_.begin(), source_order_.end(), b.id);
+                        return ai < bi;
+                    });
                 return out;
             },
             [this](const std::string& id) {
 #ifdef ENABLE_ANDROID
                 if (id == "android") {
-                    int expected = static_cast<int>(Source::None);
-                    active_source_.compare_exchange_strong(
-                        expected, static_cast<int>(Source::Android));
+                    active_source_.store(static_cast<int>(Source::Android));
                     return;
                 }
 #endif
+                active_source_.store(static_cast<int>(Source::AirPlay));
                 airplay_.set_active_source(id);
             },
             [this](const std::string& id) {
@@ -251,16 +274,36 @@ bool App::init(const Config& config) {
                     e.streaming = true;
                     out.push_back(std::move(e));
                 }
+                std::lock_guard lk(source_order_mutex_);
+                {
+                    std::vector<std::string> live;
+                    for (auto& e : out) live.push_back(e.id);
+                    source_order_.erase(
+                        std::remove_if(source_order_.begin(), source_order_.end(),
+                            [&](const std::string& id) {
+                                return std::find(live.begin(), live.end(), id) == live.end();
+                            }),
+                        source_order_.end());
+                    for (auto& id : live)
+                        if (std::find(source_order_.begin(), source_order_.end(), id) == source_order_.end())
+                            source_order_.push_back(id);
+                }
+                std::sort(out.begin(), out.end(),
+                    [this](const media::Renderer::SourceEntry& a,
+                           const media::Renderer::SourceEntry& b) {
+                        auto ai = std::find(source_order_.begin(), source_order_.end(), a.id);
+                        auto bi = std::find(source_order_.begin(), source_order_.end(), b.id);
+                        return ai < bi;
+                    });
                 return out;
             },
             [this](const std::string& id) {
                 if (id == "android") {
-                    int expected = static_cast<int>(Source::None);
-                    active_source_.compare_exchange_strong(
-                        expected, static_cast<int>(Source::Android));
+                    active_source_.store(static_cast<int>(Source::Android));
                     return;
                 }
 #ifdef ENABLE_AIRPLAY
+                active_source_.store(static_cast<int>(Source::AirPlay));
                 airplay_.set_active_source(id);
 #endif
             },

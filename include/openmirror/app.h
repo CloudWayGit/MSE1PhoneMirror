@@ -5,7 +5,9 @@
 #include <openmirror/media/renderer.h>
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
 
 #ifdef ENABLE_AIRPLAY
 #include <openmirror/airplay/airplay_server.h>
@@ -68,6 +70,13 @@ private:
     // Source priority: only one protocol streams at a time
     enum class Source { None, AirPlay, Miracast, Cast, Android };
     std::atomic<int> active_source_{static_cast<int>(Source::None)};
+
+    // Connection order across kinds. Each entry is either an AirPlay
+    // device id (e.g. "192.168.10.5") or the literal "android".
+    // Used to render the bottom-bezel source dots in the order devices
+    // actually connected.
+    std::mutex                source_order_mutex_;
+    std::vector<std::string>  source_order_;
 
 #ifdef ENABLE_AIRPLAY
     airplay::AirPlayServer airplay_;

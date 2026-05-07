@@ -2,6 +2,7 @@
 #include <openmirror/log_buffer.h>
 #include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -54,6 +55,14 @@ static SDL_Texture* make_text_texture(SDL_Renderer* renderer, const std::string&
     if (sz.cx <= 0 || sz.cy <= 0) {
         SelectObject(hdc, old_font); DeleteObject(font); DeleteDC(hdc);
         return nullptr;
+    }
+    // Add right-padding so glyph overhang (italic / ClearType subpixel /
+    // last-char ABC overhang) is not clipped. GetTextExtentPoint32 reports
+    // advance widths only, not the actual ink bounds of the last glyph.
+    {
+        TEXTMETRICA tm;
+        if (GetTextMetricsA(hdc, &tm)) sz.cx += tm.tmOverhang;
+        sz.cx += (font_height + 3) / 4;
     }
 
     BITMAPINFO bmi = {};
@@ -129,6 +138,14 @@ static SDL_Texture* make_text_texture_w(SDL_Renderer* renderer, const std::wstri
         SelectObject(hdc, old_font); DeleteObject(font); DeleteDC(hdc);
         return nullptr;
     }
+    // Add right-padding so glyph overhang (italic / ClearType subpixel /
+    // last-char ABC overhang) is not clipped. GetTextExtentPoint32 reports
+    // advance widths only, not the actual ink bounds of the last glyph.
+    {
+        TEXTMETRICW tm;
+        if (GetTextMetricsW(hdc, &tm)) sz.cx += tm.tmOverhang;
+        sz.cx += (font_height + 3) / 4;
+    }
 
     BITMAPINFO bmi = {};
     bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -178,6 +195,29 @@ static SDL_Texture* make_text_texture_w(SDL_Renderer* renderer, const std::wstri
     DeleteObject(font);
     DeleteDC(hdc);
     return tex;
+}
+
+// Cheap GDI text measurement (no texture creation). Includes the same
+// overhang/ClearType padding used by make_text_texture so the result matches
+// what will actually be rasterised.
+static int measure_text_width_a(const std::string& text, int font_height) {
+    if (text.empty()) return 0;
+    HDC hdc = CreateCompatibleDC(nullptr);
+    if (!hdc) return 0;
+    HFONT font = CreateFontA(
+        -font_height, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_NATURAL_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
+    HFONT old_font = (HFONT)SelectObject(hdc, font);
+    SIZE sz{};
+    GetTextExtentPoint32A(hdc, text.c_str(), (int)text.size(), &sz);
+    TEXTMETRICA tm{};
+    if (GetTextMetricsA(hdc, &tm)) sz.cx += tm.tmOverhang;
+    sz.cx += (font_height + 3) / 4;
+    SelectObject(hdc, old_font);
+    DeleteObject(font);
+    DeleteDC(hdc);
+    return sz.cx;
 }
 
 #endif // _WIN32
@@ -913,7 +953,7 @@ void Renderer::run() {
                     if (log_panel_visible_ && log_sb_track_h_ > 0 && log_sb_max_scroll_ > 0) {
                         int sb_w = std::max(6, log_sb_track_h_ / 80);
                         int sb_hit_w = sb_w + 12; // generous hit area
-                        int lp_w = (int)(frame_dst_h_ * 0.55f * log_panel_anim_);
+                        int lp_w = (int)(log_panel_full_w_ * log_panel_anim_);
                         int lp_margin = std::max(4, frame_dst_h_ / 40);
                         int drawer_inset = frame_dst_h_ / 16;
                         int panel_x = frame_dst_x_ + frame_dst_w_;
@@ -1224,8 +1264,11 @@ void Renderer::render_frame() {
     frame_dst_w_ = (int)(fw * scale);
     frame_dst_h_ = (int)(fh * scale);
 
+    // Log panel full-open width: fixed at 55% of phone height (legacy look).
+    log_panel_full_w_ = (int)(frame_dst_h_ * 0.55f);
+
     // Log panel width based on frame height
-    int log_panel_w = (int)(frame_dst_h_ * 0.55f * log_panel_anim_);
+    int log_panel_w = (int)(log_panel_full_w_ * log_panel_anim_);
 
     // Window width = phone frame + log panel (expands rightward, phone stays put).
     // In fullscreen we don't resize the window; instead we centre the phone
@@ -2244,7 +2287,7 @@ void Renderer::draw_log_panel() {
 #ifdef _WIN32
     if (frame_dst_w_ == 0 || log_panel_anim_ < 0.01f) return;
 
-    int lp_w = (int)(frame_dst_h_ * 0.55f * log_panel_anim_);
+    int lp_w = (int)(log_panel_full_w_ * log_panel_anim_);
     int lp_margin = std::max(4, frame_dst_h_ / 40);
     int drawer_inset = frame_dst_h_ / 16; // slightly shorter than phone
     int panel_x = frame_dst_x_ + frame_dst_w_; // flush against phone frame
@@ -2275,8 +2318,65 @@ void Renderer::draw_log_panel() {
     int font_sz = std::max(9, panel_h / 85);
     int line_h = font_sz + 2;
     int pad = std::max(6, pr);
-    int content_h = (int)lines.size() * line_h;
+    int max_text_w = panel_w - pad * 2;
     int visible_h = panel_h - pad * 2;
+
+    // Word-wrap each log line into one or more visual rows that fit
+    // max_text_w. Subsequent rows of the same source line are indented
+    // slightly so wrap is visually obvious.
+    struct WrapRow { std::string text; uint8_t r, g, b; };
+    std::vector<WrapRow> rows;
+    rows.reserve(lines.size() + 16);
+
+    auto color_for = [](const std::string& s, uint8_t& r, uint8_t& g, uint8_t& b) {
+        r = 160; g = 160; b = 160;
+        if      (s.find("[Cast]")     != std::string::npos) { r = 120; g = 200; b = 120; }
+        else if (s.find("[AirPlay]")  != std::string::npos) { r = 120; g = 160; b = 255; }
+        else if (s.find("[Renderer]") != std::string::npos) { r = 200; g = 180; b = 120; }
+        if (s.find("Warning") != std::string::npos ||
+            s.find("Failed")  != std::string::npos ||
+            s.find("Error")   != std::string::npos) { r = 255; g = 120; b = 120; }
+    };
+
+    const std::string cont_indent = "  ";
+    // Safety budget: GetTextExtentPoint32 + tmOverhang still understates the
+    // true right-edge ink of long ClearType-rendered strings by a few px due
+    // to subpixel positioning. Reserve a font-height-sized margin so the
+    // SDL clip rect at the panel edge never chops the last glyph.
+    int wrap_budget = std::max(8, max_text_w - font_sz);
+    for (auto& src : lines) {
+        uint8_t lr, lg, lb; color_for(src, lr, lg, lb);
+        if (measure_text_width_a(src, font_sz) <= wrap_budget) {
+            rows.push_back({src, lr, lg, lb});
+            continue;
+        }
+        std::string remaining = src;
+        bool first_row = true;
+        while (!remaining.empty()) {
+            std::string prefix = first_row ? std::string{} : cont_indent;
+            // Find the longest substring of remaining s.t. prefix+substring fits.
+            int lo = 1, hi = (int)remaining.size(), best = 1;
+            while (lo <= hi) {
+                int mid = (lo + hi) / 2;
+                int w = measure_text_width_a(prefix + remaining.substr(0, mid), font_sz);
+                if (w <= wrap_budget) { best = mid; lo = mid + 1; }
+                else hi = mid - 1;
+            }
+            // Try to break at a space at or before `best` for nicer wrapping.
+            int brk = best;
+            if (best < (int)remaining.size()) {
+                int sp = (int)remaining.rfind(' ', best);
+                if (sp > 0 && sp >= best / 2) brk = sp;
+            }
+            rows.push_back({prefix + remaining.substr(0, brk), lr, lg, lb});
+            remaining.erase(0, brk);
+            // Skip a leading space when continuing.
+            if (!remaining.empty() && remaining.front() == ' ') remaining.erase(0, 1);
+            first_row = false;
+        }
+    }
+
+    int content_h = (int)rows.size() * line_h;
 
     // Clamp scroll
     int max_scroll = std::max(0, content_h - visible_h);
@@ -2297,34 +2397,20 @@ void Renderer::draw_log_panel() {
     SDL_Rect clip = {panel_x + pad, panel_y + pad, panel_w - pad * 2, visible_h};
     SDL_RenderSetClipRect(sdl_renderer_, &clip);
 
-    // Only render visible lines for performance
+    // Only render visible rows for performance
     int first_visible = log_scroll_offset_ / line_h;
     int last_visible = (log_scroll_offset_ + visible_h) / line_h + 1;
     first_visible = std::max(0, first_visible);
-    last_visible = std::min((int)lines.size(), last_visible);
+    last_visible = std::min((int)rows.size(), last_visible);
 
     int text_x = panel_x + pad;
-    int max_text_w = panel_w - pad * 2;
 
     for (int i = first_visible; i < last_visible; i++) {
         int y = panel_y + pad + i * line_h - log_scroll_offset_;
-
-        // Truncate long lines for display
-        std::string display_line = lines[i];
-        if ((int)display_line.size() > max_text_w / (font_sz / 3))
-            display_line = display_line.substr(0, max_text_w / (font_sz / 3));
-
-        // Color based on content
-        uint8_t r = 160, g = 160, b = 160;
-        if (display_line.find("[Cast]") != std::string::npos) { r = 120; g = 200; b = 120; }
-        else if (display_line.find("[AirPlay]") != std::string::npos) { r = 120; g = 160; b = 255; }
-        else if (display_line.find("[Renderer]") != std::string::npos) { r = 200; g = 180; b = 120; }
-        else if (display_line.find("Warning") != std::string::npos ||
-                 display_line.find("Failed") != std::string::npos ||
-                 display_line.find("Error") != std::string::npos) { r = 255; g = 120; b = 120; }
-
+        const auto& row = rows[i];
         int tw = 0, th = 0;
-        SDL_Texture* tex = make_text_texture(sdl_renderer_, display_line, font_sz, r, g, b, &tw, &th);
+        SDL_Texture* tex = make_text_texture(sdl_renderer_, row.text, font_sz,
+                                              row.r, row.g, row.b, &tw, &th);
         if (tex) {
             SDL_Rect dst = {text_x, y, tw, th};
             SDL_RenderCopy(sdl_renderer_, tex, nullptr, &dst);
@@ -2464,6 +2550,13 @@ void Renderer::android_submit() {
         android_status_ = r;
         android_status_is_error_ = err;
         android_busy_ = false;
+        // On success, auto-close the pair panel so the projected phone
+        // becomes visible immediately.
+        if (!err) {
+            android_panel_visible_ = false;
+            android_panel_animating_ = true;
+            android_panel_anim_start_ = std::chrono::steady_clock::now();
+        }
     }).detach();
 }
 
@@ -2811,7 +2904,7 @@ void Renderer::update_window_shape() {
     if (log_panel_anim_ > 0.01f) {
         // Combine phone frame region with log panel region (right side, drawer)
         // Flat left edge, rounded right edge only
-        int lp_w = (int)(frame_dst_h_ * 0.55f * log_panel_anim_);
+        int lp_w = (int)(log_panel_full_w_ * log_panel_anim_);
         int lp_margin = std::max(4, frame_dst_h_ / 40);
         int drawer_inset = frame_dst_h_ / 16;
         int lp_cr = std::max(8, cr / 2);

@@ -58,18 +58,27 @@ jobs:
       - name: Install vcpkg + dependencies
         shell: pwsh
         run: |
-          # Prefer the preinstalled vcpkg on the runner image.
+          # Try preinstalled vcpkg on the runner image first.
           $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
-          if (-not $vcpkgRoot -or -not (Test-Path "$vcpkgRoot\vcpkg.exe")) {
-            $vcpkgRoot = "$env:USERPROFILE\vcpkg-1pm"
-            if (-not (Test-Path "$vcpkgRoot\vcpkg.exe")) {
-              if (Test-Path $vcpkgRoot) { Remove-Item -Recurse -Force $vcpkgRoot }
+          $usable = $vcpkgRoot -and (Test-Path (Join-Path $vcpkgRoot 'vcpkg.exe'))
+          if (-not $usable) {
+            $vcpkgRoot = Join-Path $env:USERPROFILE 'vcpkg-1pm'
+            $bin = Join-Path $vcpkgRoot 'vcpkg.exe'
+            if (-not (Test-Path $bin)) {
+              if (Test-Path $vcpkgRoot) {
+                Write-Host "Cleaning stale $vcpkgRoot"
+                cmd /c "rmdir /s /q `"$vcpkgRoot`""
+              }
               git clone --depth 1 https://github.com/microsoft/vcpkg.git $vcpkgRoot
-              & "$vcpkgRoot\bootstrap-vcpkg.bat" -disableMetrics
+              if ($LASTEXITCODE -ne 0) { throw "git clone vcpkg failed" }
+              $bootstrap = Join-Path $vcpkgRoot 'bootstrap-vcpkg.bat'
+              if (-not (Test-Path $bootstrap)) { throw "bootstrap-vcpkg.bat missing at $bootstrap" }
+              & $bootstrap -disableMetrics
+              if ($LASTEXITCODE -ne 0) { throw "vcpkg bootstrap failed" }
             }
           }
           Write-Host "Using vcpkg at $vcpkgRoot"
-          & "$vcpkgRoot\vcpkg.exe" install `
+          & (Join-Path $vcpkgRoot 'vcpkg.exe') install `
             "ffmpeg[avcodec,avformat,swscale,swresample]:x64-windows" `
             "sdl2:x64-windows" `
             "openssl:x64-windows" `

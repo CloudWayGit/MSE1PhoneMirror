@@ -25,7 +25,21 @@ Add it to the repo:
 
 ### 2. Make the FIRST winget submission manually
 
-The package identifier `MSEndpointMgr.1PhoneMirror` does not exist in the catalog yet, so the automated update path can't run. After the first GitHub Release exists with the MSI attached:
+The package identifier `MSEndpointMgr.1PhoneMirror` does not exist in the catalog yet, so the automated update path can't run.
+
+**Prerequisite:** the GitHub Release must already exist with the MSI attached, so the URL below is reachable. If it isn't yet, do this first:
+
+```powershell
+# Tag & push to trigger .github/workflows/release.yml — this builds the MSI
+# and creates the GitHub Release that hosts it.
+git tag v0.2.0
+git push origin v0.2.0
+# Wait for the "Build & Release MSI" workflow to finish (Actions tab).
+# Confirm the asset exists:
+#   https://github.com/SimonSkotheimsvik/1PhoneMirror/releases/tag/v0.2.0
+```
+
+Once the release is live:
 
 ```powershell
 winget install Microsoft.WingetCreate
@@ -45,7 +59,7 @@ The wizard asks for:
 | Author | `Simon Skotheimsvik` |
 | License | `GPL-3.0` |
 | ShortDescription | Wireless screen mirroring for iOS (AirPlay) and Android (scrcpy) on Windows. |
-| Homepage | `https://github.com/SimonSkotheimsvik/1PhoneMirror` |
+| Homepage | `https://msendpointmgr.com/1PhoneMirror` |
 | Tags | `mirror`, `airplay`, `scrcpy`, `screen-mirroring`, `iOS`, `android` |
 | InstallerType | `wix` |
 | Scope | `machine` |

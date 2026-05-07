@@ -229,6 +229,7 @@ private:
     float log_panel_anim_ = 0.0f; // 0=hidden, 1=fully visible
     std::chrono::steady_clock::time_point log_panel_anim_start_;
     int log_scroll_offset_ = 0;
+    int log_panel_full_w_ = 0; // dynamic full-open width (px), recomputed each frame
     uint64_t log_last_version_ = 0;
     BtnRect log_btn_; // right bezel star button
     bool log_scrollbar_dragging_ = false;

@@ -469,7 +469,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         footer_line1_.push_back(seg(L"1PhoneMirror by ", 120, 120, 120));
         footer_line1_.push_back(seg(L"MSEndpointMgr", 120, 120, 120,
                                      "https://msendpointmgr.com/", "Open MSEndpointMgr"));
-        // Line 2: "(c) 2026 \u266B Simon Skotheimsvik, MVP \u00B7 v0.2.4"
+        // Line 2: "(c) 2026 \u266B Simon Skotheimsvik, MVP \u00B7 v0.2.5"
         footer_line2_.push_back(seg(L"\u00A9 2026 ", 100, 100, 100));
         // Beamed-eighth-notes glyph — render via Segoe UI Symbol so it works
         // on Windows builds where the regular Segoe UI font lacks U+266B.
@@ -479,7 +479,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         footer_line2_.push_back(seg(L" ", 100, 100, 100));
         footer_line2_.push_back(seg(L"Simon Skotheimsvik, MVP", 100, 100, 100,
                                      "https://linktr.ee/simonskotheimsvik", "More info of Simon"));
-        footer_line2_.push_back(seg(L" \u00B7 v0.2.4", 100, 100, 100,
+        footer_line2_.push_back(seg(L" \u00B7 v0.2.5", 100, 100, 100,
                                      "", "Version history (V)"));
     }
 #endif
@@ -493,7 +493,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
             line.tex = make_text_texture_w(sdl_renderer_, text, font_sz, r, g, b, &line.w, &line.h);
             return line;
         };
-        info_lines_.push_back(make_info(L"1PhoneMirror v0.2.4", 44, 255, 255, 255));
+        info_lines_.push_back(make_info(L"1PhoneMirror v0.2.5", 44, 255, 255, 255));
         info_lines_.push_back(make_info(L"AirPlay (iOS) \u00B7 scrcpy (Android)", 34, 160, 160, 160));
         info_lines_.push_back({nullptr, 0, 0}); // spacer
         info_lines_.push_back(make_info(L"(F) Fullscreen \u00B7 (M) Menu \u00B7 (L) Log \u00B7 (A) Add Android", 30, 130, 130, 130));
@@ -519,6 +519,9 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         };
         version_lines_.push_back(make_ver(L"Version History", 40, 255, 255, 255));
         version_lines_.push_back({nullptr, 0, 0}); // spacer
+        version_lines_.push_back(make_ver(L"09.05.2026 \u2013 0.2.5", 34, 200, 200, 255));
+        version_lines_.push_back(make_ver(L"Info panel: copy network test PowerShell script (with MDM check)", 30, 160, 160, 160));
+        version_lines_.push_back({nullptr, 0, 0});
         version_lines_.push_back(make_ver(L"08.05.2026 \u2013 0.2.4", 34, 200, 200, 255));
         version_lines_.push_back(make_ver(L"Refined bezel toggles and auto-collapse on connect", 30, 160, 160, 160));
         version_lines_.push_back({nullptr, 0, 0});
@@ -1240,6 +1243,64 @@ void Renderer::run() {
                     // a bezel button (e.g. the gear) is not eaten by this
                     // dismiss handler.
                     if (info_panel_visible_ && info_panel_anim_ >= 1.0f) {
+                        // "Copy network test script" — copies a PowerShell
+                        // troubleshooting block to the clipboard.
+                        if (info_copy_ps_btn_.w > 0 &&
+                            in_rect(mx, my, info_copy_ps_btn_.x, info_copy_ps_btn_.y,
+                                    info_copy_ps_btn_.w, info_copy_ps_btn_.h)) {
+                            const char* ps_script =
+                                "# 1PhoneMirror — network troubleshooting\r\n"
+                                "Write-Host '== Firewall profile (LocalRulesAllowed = False means MDM/Intune blocks installer rules) ==' -ForegroundColor Cyan\r\n"
+                                "Get-NetFirewallProfile |\r\n"
+                                "    Format-Table Name, Enabled, AllowLocalFirewallRules, AllowLocalIPsecRules, DefaultInboundAction -AutoSize\r\n"
+                                "\r\n"
+                                "Write-Host '== MDM/Intune Firewall CSP policy (AllowLocalPolicyMerge = 0 means locked) ==' -ForegroundColor Cyan\r\n"
+                                "Get-ChildItem 'HKLM:\\SOFTWARE\\Microsoft\\PolicyManager\\current\\device\\Firewall' -Recurse -ErrorAction SilentlyContinue |\r\n"
+                                "    Get-ItemProperty |\r\n"
+                                "    Select-Object PSChildName, AllowLocalPolicyMerge, AllowLocalIpsecPolicyMerge, EnableFirewall, DefaultInboundAction |\r\n"
+                                "    Format-Table -AutoSize\r\n"
+                                "\r\n"
+                                "Write-Host '== Firewall rules for 1PhoneMirror ==' -ForegroundColor Cyan\r\n"
+                                "Get-NetFirewallApplicationFilter |\r\n"
+                                "    Where-Object Program -like '*1PhoneMirror*' |\r\n"
+                                "    ForEach-Object {\r\n"
+                                "        $r = Get-NetFirewallRule -AssociatedNetFirewallApplicationFilter $_\r\n"
+                                "        [pscustomobject]@{\r\n"
+                                "            Name      = $r.DisplayName\r\n"
+                                "            Enabled   = $r.Enabled\r\n"
+                                "            Direction = $r.Direction\r\n"
+                                "            Action    = $r.Action\r\n"
+                                "            Profile   = $r.Profile\r\n"
+                                "            Program   = $_.Program\r\n"
+                                "        }\r\n"
+                                "    } | Format-Table -AutoSize\r\n"
+                                "\r\n"
+                                "Write-Host '== Listening TCP ports (AirPlay 7000/7001/7100, scrcpy 27183) ==' -ForegroundColor Cyan\r\n"
+                                "Get-NetTCPConnection -State Listen |\r\n"
+                                "    Where-Object LocalPort -in 7000,7001,7100,27183 |\r\n"
+                                "    Select-Object LocalAddress, LocalPort,\r\n"
+                                "        @{n='Process';e={(Get-Process -Id $_.OwningProcess).ProcessName}} |\r\n"
+                                "    Format-Table -AutoSize\r\n"
+                                "\r\n"
+                                "Write-Host '== Listening UDP ports (mDNS 5353, AirPlay 6000-6010) ==' -ForegroundColor Cyan\r\n"
+                                "Get-NetUDPEndpoint |\r\n"
+                                "    Where-Object LocalPort -in 5353,6000,6001,6002,6003,6004,6005,6006,6007,6008,6009,6010 |\r\n"
+                                "    Select-Object LocalAddress, LocalPort,\r\n"
+                                "        @{n='Process';e={(Get-Process -Id $_.OwningProcess).ProcessName}} |\r\n"
+                                "    Format-Table -AutoSize\r\n"
+                                "\r\n"
+                                "Write-Host '== Local IPv4 addresses (share with the phone) ==' -ForegroundColor Cyan\r\n"
+                                "Get-NetIPAddress -AddressFamily IPv4 |\r\n"
+                                "    Where-Object { $_.PrefixOrigin -ne 'WellKnown' } |\r\n"
+                                "    Select-Object IPAddress, InterfaceAlias, PrefixOrigin |\r\n"
+                                "    Format-Table -AutoSize\r\n";
+                            SDL_SetClipboardText(ps_script);
+                            toast_text_ = "PowerShell test script copied to clipboard";
+                            toast_active_ = true;
+                            toast_start_ = std::chrono::steady_clock::now();
+                            std::cout << "[Renderer] Copied network troubleshooting script\n";
+                            break;
+                        }
                         if (!in_rect(mx, my, info_panel_rect_.x, info_panel_rect_.y,
                                      info_panel_rect_.w, info_panel_rect_.h)) {
                             info_panel_visible_ = false;
@@ -2690,6 +2751,15 @@ void Renderer::draw_info_panel() {
         else
             total_h += spacer_h;
     }
+    // Reserve space for the "Copy network test script" button beneath the
+    // text lines: spacer + button + bottom pad. Sized to match the
+    // network-requirement lines so it doesn't dominate the panel.
+    int btn_label_h = std::max(14, (int)(30 * text_scale + 0.5f));
+    int btn_h = btn_label_h + std::max(4, pad / 5);
+    // Hover caption is a smaller line that appears under the button on hover
+    // — reserve its slot up-front so the panel doesn't reflow when shown.
+    int hint_label_h = std::max(11, (int)(22 * text_scale + 0.5f));
+    total_h += spacer_h + btn_h + line_gap + hint_label_h;
     total_h += pad - line_gap;
 
     int panel_w = (int)(svw * 0.80f);
@@ -2741,6 +2811,74 @@ void Renderer::draw_info_panel() {
             cy += spacer_h;
         }
     }
+
+    // "Copy network test script" button — pasted into a PowerShell window
+    // to verify firewall rules and listening ports for AirPlay / scrcpy.
+    // Sized to roughly match the network-requirement text rather than a
+    // big call-to-action; a hover caption explains usage.
+    cy += spacer_h;
+
+    int mx, my;
+    SDL_GetMouseState(&mx, &my);
+
+#ifdef _WIN32
+    // Render the label first so the button can wrap tightly around it.
+    int lw = 0, lh = 0;
+    SDL_Texture* lab = make_text_texture(sdl_renderer_,
+        "Copy network test script", btn_label_h,
+        220, 220, 230, &lw, &lh);
+    int btn_w = lw + std::max(12, pad);
+    if (btn_w > panel_w - pad * 2) btn_w = panel_w - pad * 2;
+    int btn_x = panel_x + (panel_w - btn_w) / 2;
+    int btn_y = cy;
+    info_copy_ps_btn_ = {btn_x, btn_y, btn_w, btn_h};
+
+    bool hov = info_panel_anim_ >= 1.0f &&
+               in_rect(mx, my, btn_x, btn_y, btn_w, btn_h);
+    uint8_t bg = hov ? 70 : 50;
+    SDL_SetRenderDrawColor(sdl_renderer_, bg, bg, bg + 8, alpha);
+    SDL_Rect br = {btn_x, btn_y, btn_w, btn_h};
+    SDL_RenderFillRect(sdl_renderer_, &br);
+    SDL_SetRenderDrawColor(sdl_renderer_, 110, 110, 130,
+                           (uint8_t)(180 * info_panel_anim_));
+    SDL_RenderDrawRect(sdl_renderer_, &br);
+
+    if (lab) {
+        SDL_SetTextureColorMod(lab, hov ? 255 : 220, hov ? 255 : 220, hov ? 255 : 230);
+        SDL_SetTextureAlphaMod(lab, text_alpha);
+        SDL_Rect ldst = {btn_x + (btn_w - lw) / 2,
+                         btn_y + (btn_h - lh) / 2, lw, lh};
+        SDL_RenderCopy(sdl_renderer_, lab, nullptr, &ldst);
+        SDL_DestroyTexture(lab);
+    }
+    cy += btn_h + line_gap;
+
+    // Hover caption — only rendered when the button is hovered. Reuses
+    // the slot reserved in the height calculation so the panel doesn't
+    // reflow when it appears.
+    if (hov) {
+        int hw = 0, hh = 0;
+        SDL_Texture* hint = make_text_texture(sdl_renderer_,
+            "Paste into a PowerShell window to verify firewall rules and listening ports.",
+            hint_label_h, 150, 150, 160, &hw, &hh);
+        if (hint) {
+            // Shrink-to-fit if the line is wider than the panel.
+            int max_w = panel_w - pad * 2;
+            int draw_w = hw, draw_h = hh;
+            if (hw > max_w) {
+                float s = (float)max_w / hw;
+                draw_w = max_w;
+                draw_h = (int)(hh * s);
+            }
+            SDL_SetTextureAlphaMod(hint, text_alpha);
+            SDL_Rect hdst = {panel_x + (panel_w - draw_w) / 2, cy, draw_w, draw_h};
+            SDL_RenderCopy(sdl_renderer_, hint, nullptr, &hdst);
+            SDL_DestroyTexture(hint);
+        }
+    }
+#else
+    info_copy_ps_btn_ = {0, 0, 0, 0};
+#endif
 }
 
 void Renderer::draw_version_panel() {

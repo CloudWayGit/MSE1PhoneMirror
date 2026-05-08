@@ -231,6 +231,10 @@ private:
     float info_panel_anim_ = 0.0f; // 0=hidden, 1=fully visible
     std::chrono::steady_clock::time_point info_panel_anim_start_;
     BtnRect info_panel_rect_;
+    // Clickable "Copy network test script" button at the bottom of the
+    // Info panel — copies a PowerShell troubleshooting script (firewall
+    // rules + listening ports) to the clipboard.
+    BtnRect info_copy_ps_btn_;
     struct InfoLine {
         SDL_Texture* tex = nullptr;
         int w = 0, h = 0;

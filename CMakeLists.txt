@@ -39,6 +39,7 @@ set(MEDIA_SOURCES
     src/media/renderer.cpp
     src/media/audio_output.cpp
     src/media/phone_frame.cpp
+    src/media/recorder.cpp
 )
 
 set(NETWORK_SOURCES

@@ -581,6 +581,10 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
 
 void Renderer::shutdown() {
     running_.store(false);
+    if (recorder_.is_recording()) {
+        std::cout << "[Recorder] Finalising on shutdown\n";
+        recorder_.stop();
+    }
     for (auto& s : footer_line1_) { if (s.tex) SDL_DestroyTexture(s.tex); }
     for (auto& s : footer_line2_) { if (s.tex) SDL_DestroyTexture(s.tex); }
     footer_line1_.clear();
@@ -794,6 +798,12 @@ void Renderer::run() {
                 }
                 if (event.key.keysym.sym == SDLK_s && (event.key.keysym.mod & KMOD_CTRL)) {
                     screenshot_requested_ = true;
+                    btn_flash_ = true;
+                    btn_flash_start_ = std::chrono::steady_clock::now();
+                }
+                // Ctrl+R toggles screen recording.
+                if (event.key.keysym.sym == SDLK_r && (event.key.keysym.mod & KMOD_CTRL)) {
+                    record_toggle_requested_ = true;
                     btn_flash_ = true;
                     btn_flash_start_ = std::chrono::steady_clock::now();
                 }
@@ -1232,6 +1242,15 @@ void Renderer::run() {
                         btn_flash_start_ = std::chrono::steady_clock::now();
                         break;
                     }
+                    // Record button (toggle / cancel countdown)
+                    if (record_btn_.w > 0 &&
+                        in_rect(mx, my, record_btn_.x, record_btn_.y,
+                                record_btn_.w, record_btn_.h)) {
+                        record_toggle_requested_ = true;
+                        btn_flash_ = true;
+                        btn_flash_start_ = std::chrono::steady_clock::now();
+                        break;
+                    }
                     // Folder button
                     if (in_rect(mx, my, folder_btn_.x, folder_btn_.y,
                                 folder_btn_.w, folder_btn_.h)) {
@@ -1512,6 +1531,7 @@ void Renderer::render_frame() {
                         (int)(tex_width_ * sc), (int)(tex_height_ * sc)};
         SDL_RenderCopy(sdl_renderer_, texture_, nullptr, &dst);
         close_btn_ = screenshot_btn_ = folder_btn_ = icon_btn_ = {};
+        record_btn_ = {};
         resize_grip_ = {};
         frame_dst_w_ = 0;
         SDL_RenderPresent(sdl_renderer_);
@@ -2254,6 +2274,43 @@ void Renderer::render_frame() {
         screenshot_requested_ = false;
         take_screenshot();
     }
+
+    // ---- Recording lifecycle (after the present so we feed encoded frames
+    // immediately and any UI changes happen on the next loop) ----
+    if (record_toggle_requested_) {
+        record_toggle_requested_ = false;
+        if (recorder_.is_recording()) {
+            stop_recording();
+        } else if (record_countdown_ms_ > 0) {
+            record_countdown_start_ = std::chrono::steady_clock::now();
+        } else {
+            start_recording();
+        }
+    }
+
+    // Countdown -> start
+    if (record_countdown_ms_ > 0 && !recorder_.is_recording()) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - record_countdown_start_).count();
+        if (elapsed >= record_countdown_ms_) {
+            record_countdown_ms_ = 0;
+            start_recording();
+        }
+    }
+
+    // Push the latest composited frame to the recorder.
+    if (recorder_.is_recording() && !last_frame_data_.empty()) {
+        // Use the raw decoded frame (no phone bezel) to keep file size
+        // sensible. Phone-frame compositing is screenshot-only for now.
+        recorder_.push_frame(last_frame_data_.data(), last_frame_w_,
+                             last_frame_h_, last_frame_stride_);
+    }
+
+    // Recorder may have hit max-duration on the worker — finalise from the
+    // renderer thread so we own the toast/UI updates.
+    if (recorder_.should_finalize()) {
+        stop_recording();
+    }
 }
 
 bool Renderer::tooltip_ready(const std::string& key) {
@@ -2528,6 +2585,53 @@ void Renderer::draw_island() {
     SDL_Rect folder_tab = {fcx - fr, fcy - fr, fr, 2};
     SDL_RenderFillRect(sdl_renderer_, &folder_tab);
 
+    // Record button (to the right of the photo button — sits between
+    // folder and screenshot in the right-to-left cluster).
+    bx -= btn_sz + gap;
+    record_btn_ = {bx, by, btn_sz, btn_sz};
+    bool rec_hover = in_rect(mx, my, bx, by, btn_sz, btn_sz);
+    bool rec_active = recorder_.is_recording();
+    bool rec_count  = (record_countdown_ms_ > 0 && !rec_active);
+    // Pulsing red while recording (200 ms cosine breathing).
+    float rec_pulse = 1.0f;
+    if (rec_active) {
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - btn_flash_start_).count(); // any monotonic reference
+        rec_pulse = 0.55f + 0.45f * (float)std::abs(std::sin(ms * 0.005));
+    }
+    uint8_t rec_bg_r = rec_active ? (uint8_t)(110 * rec_pulse + 60) : (rec_hover ? 80 : 55);
+    uint8_t rec_bg_g = rec_hover ? 35 : 35;
+    uint8_t rec_bg_b = rec_hover ? 35 : 35;
+    SDL_SetRenderDrawColor(sdl_renderer_, rec_bg_r, rec_bg_g, rec_bg_b, 180);
+    fill_circle(sdl_renderer_, bx + btn_sz / 2, by + btn_sz / 2, btn_sz / 2);
+    // Glyph: filled red circle when idle, red square when recording, red
+    // circle with thin ring when counting down.
+    int recr = btn_sz / 4;
+    int rcx = bx + btn_sz / 2, rcy = by + btn_sz / 2;
+    uint8_t rdot_a = rec_active ? 255 : (rec_hover ? 240 : 210);
+    if (rec_active) {
+        // Square indicator
+        int sq = recr;
+        SDL_Rect sqr = {rcx - sq, rcy - sq, sq * 2, sq * 2};
+        SDL_SetRenderDrawColor(sdl_renderer_, 235, 80, 80, rdot_a);
+        SDL_RenderFillRect(sdl_renderer_, &sqr);
+    } else {
+        SDL_SetRenderDrawColor(sdl_renderer_, 235, 80, 80, rdot_a);
+        fill_circle(sdl_renderer_, rcx, rcy, recr);
+        if (rec_count) {
+            // Thin white ring around the dot during countdown.
+            int ring = recr + 3;
+            SDL_SetRenderDrawColor(sdl_renderer_, 240, 240, 240, 220);
+            for (int dy = -ring; dy <= ring; dy++) {
+                for (int dx = -ring; dx <= ring; dx++) {
+                    int d2 = dx * dx + dy * dy;
+                    if (d2 <= ring * ring && d2 >= (ring - 1) * (ring - 1))
+                        SDL_RenderDrawPoint(sdl_renderer_, rcx + dx, rcy + dy);
+                }
+            }
+        }
+    }
+
     // Screenshot button
     bx -= btn_sz + gap;
     screenshot_btn_ = {bx, by, btn_sz, btn_sz};
@@ -2559,6 +2663,7 @@ void Renderer::draw_island() {
     else if (folder_hover) new_hover = 2;
     else if (icon_hover) new_hover = 3;
     else if (gear_hover) new_hover = 6;
+    else if (rec_hover) new_hover = 7;
 
     // Tooltip — use the same draw_bezel_tooltip() as the bezel dots so the
     // styling, font size, edge-clamping and 1 s hover delay are identical
@@ -2573,6 +2678,21 @@ void Renderer::draw_island() {
             case 2: tip = "Open Screenshots Folder";  break;
             case 3: tip = "About 1PhoneMirror (I)"; break;
             case 6: tip = "Settings (S)"; break;
+            case 7: {
+                static std::string rec_tip;
+                if (recorder_.is_recording()) {
+                    int s = (int)recorder_.elapsed_seconds();
+                    char buf[64];
+                    std::snprintf(buf, sizeof(buf), "Stop recording \xE2\x80\xA2 %d:%02d (Ctrl+R)\nRight-click for delay/timed", s / 60, s % 60);
+                    rec_tip = buf;
+                } else if (record_countdown_ms_ > 0) {
+                    rec_tip = "Cancel countdown";
+                } else {
+                    rec_tip = "Record (Ctrl+R)\nRight-click for delay/timed";
+                }
+                tip = rec_tip.c_str();
+                break;
+            }
         }
         if (tip) {
             // Anchor at the cursor, force tooltip BELOW so it never
@@ -4149,6 +4269,87 @@ void Renderer::open_screenshot_folder() {
     std::filesystem::create_directories(screenshot_dir_);
     ShellExecuteA(nullptr, "explore", screenshot_dir_.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 #endif
+}
+
+std::string Renderer::make_recording_path() const {
+    auto now = std::chrono::system_clock::now();
+    auto tt  = std::chrono::system_clock::to_time_t(now);
+    struct tm local_tm;
+#ifdef _WIN32
+    localtime_s(&local_tm, &tt);
+#else
+    localtime_r(&tt, &local_tm);
+#endif
+    char ts[32];
+    strftime(ts, sizeof(ts), "%Y%m%d_%H%M%S", &local_tm);
+    const char* ext = (settings_.record_format == 1) ? ".gif" : ".mp4";
+    return screenshot_dir_ + "/recording_" + ts + ext;
+}
+
+void Renderer::start_recording() {
+    if (recorder_.is_recording()) return;
+    if (last_frame_data_.empty() || last_frame_w_ == 0 || last_frame_h_ == 0) {
+        toast_text_ = "No video to record yet";
+        toast_active_ = true;
+        toast_start_ = std::chrono::steady_clock::now();
+        return;
+    }
+    std::filesystem::create_directories(screenshot_dir_);
+
+    media::RecordConfig cfg;
+    cfg.format           = (settings_.record_format == 1) ? media::RecordFormat::GIF
+                                                          : media::RecordFormat::MP4;
+    cfg.output_path      = make_recording_path();
+    cfg.width            = last_frame_w_ & ~1;
+    cfg.height           = last_frame_h_ & ~1;
+    cfg.target_fps       = (cfg.format == media::RecordFormat::GIF)
+                            ? settings_.record_fps_gif
+                            : settings_.record_fps_mp4;
+    cfg.bitrate_kbps     = settings_.record_bitrate_kbps;
+    cfg.max_duration_sec = (pending_record_duration_sec_ > 0)
+                            ? pending_record_duration_sec_
+                            : settings_.record_max_duration_sec;
+    pending_record_duration_sec_ = 0;
+
+    if (!recorder_.start(cfg)) {
+        toast_text_ = std::string("Recording failed: ") + recorder_.last_error();
+        toast_active_ = true;
+        toast_start_ = std::chrono::steady_clock::now();
+        return;
+    }
+    std::cout << "[Recorder] Started: " << cfg.output_path
+              << " (" << cfg.width << "x" << cfg.height
+              << " @ " << cfg.target_fps << " fps)\n";
+    toast_text_ = (cfg.format == media::RecordFormat::GIF)
+        ? "Recording GIF \xE2\x80\xA6"
+        : "Recording MP4 \xE2\x80\xA6";
+    toast_active_ = true;
+    toast_start_  = std::chrono::steady_clock::now();
+}
+
+void Renderer::stop_recording() {
+    if (!recorder_.is_recording() && record_countdown_ms_ == 0) return;
+    if (record_countdown_ms_ > 0 && !recorder_.is_recording()) {
+        // Cancel countdown
+        record_countdown_ms_ = 0;
+        toast_text_ = "Recording cancelled";
+        toast_active_ = true;
+        toast_start_ = std::chrono::steady_clock::now();
+        return;
+    }
+    std::string out = recorder_.stop();
+    std::string err = recorder_.last_error();
+    if (!err.empty()) {
+        toast_text_ = std::string("Recording failed: ") + err;
+    } else if (!out.empty()) {
+        std::filesystem::path p(out);
+        toast_text_ = std::string("Saved ") + p.filename().string();
+        std::cout << "[Recorder] Saved: " << out << "\n";
+    } else {
+        toast_text_ = "Recording stopped";
+    }
+    toast_active_ = true;
+    toast_start_  = std::chrono::steady_clock::now();
 }
 
 void Renderer::copy_to_clipboard(const uint8_t* rgba, int w, int h) {

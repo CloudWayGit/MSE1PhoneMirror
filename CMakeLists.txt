@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(1PhoneMirror VERSION 0.3.0 LANGUAGES C CXX)
+project(1PhoneMirror VERSION 0.3.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,6 +21,7 @@ find_library(AVFORMAT_LIBRARY avformat)
 find_library(AVUTIL_LIBRARY avutil)
 find_library(SWSCALE_LIBRARY swscale)
 find_library(SWRESAMPLE_LIBRARY swresample)
+find_library(AVFILTER_LIBRARY avfilter)
 
 # SDL2
 find_package(SDL2 CONFIG REQUIRED)
@@ -116,6 +117,7 @@ target_link_libraries(1PhoneMirror PRIVATE
     ${AVUTIL_LIBRARY}
     ${SWSCALE_LIBRARY}
     ${SWRESAMPLE_LIBRARY}
+    ${AVFILTER_LIBRARY}
     SDL2::SDL2
     SDL2::SDL2main
     OpenSSL::SSL

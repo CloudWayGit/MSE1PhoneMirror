@@ -18,6 +18,8 @@ struct AVStream;
 struct AVFrame;
 struct AVPacket;
 struct SwsContext;
+struct AVFilterGraph;
+struct AVFilterContext;
 }
 
 namespace openmirror::media {
@@ -99,6 +101,7 @@ private:
 
     void worker_loop();
     bool init_encoder();           // called on the worker thread
+    bool init_gif_filter_graph(int src_w, int src_h); // GIF only, lazy
     bool encode_frame(AVFrame* frame); // pushes into encoder, drains packets
     void teardown_encoder();
     void set_error(const std::string& msg);
@@ -126,6 +129,15 @@ private:
     AVFrame*         enc_frame_ = nullptr;
     SwsContext*      sws_       = nullptr;
     int64_t          next_pts_  = 0;
+
+    // GIF-only: libavfilter graph for palettegen + paletteuse, which gives
+    // us a per-frame optimal 256-colour palette plus reserved transparent
+    // index. Built lazily on first frame so we know the source size.
+    AVFilterGraph*   filter_graph_ = nullptr;
+    AVFilterContext* buffersrc_    = nullptr;
+    AVFilterContext* buffersink_   = nullptr;
+    AVFrame*         filt_in_      = nullptr; // RGBA staging frame
+    AVFrame*         filt_out_     = nullptr; // PAL8 frame from buffersink
 
     // Error state (touched from any thread).
     mutable std::mutex error_mutex_;

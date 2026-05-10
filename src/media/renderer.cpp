@@ -469,7 +469,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         footer_line1_.push_back(seg(L"1PhoneMirror by ", 120, 120, 120));
         footer_line1_.push_back(seg(L"MSEndpointMgr", 120, 120, 120,
                                      "https://msendpointmgr.com/", "Open MSEndpointMgr"));
-        // Line 2: "(c) 2026 \u266B Simon Skotheimsvik, MVP \u00B7 v0.3.0"
+        // Line 2: "(c) 2026 \u266B Simon Skotheimsvik, MVP \u00B7 v0.3.1"
         footer_line2_.push_back(seg(L"\u00A9 2026 ", 100, 100, 100));
         // Beamed-eighth-notes glyph — render via Segoe UI Symbol so it works
         // on Windows builds where the regular Segoe UI font lacks U+266B.
@@ -487,7 +487,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
                                      "https://buymeacoffee.com/simonskothn",
                                      "Buy me a coffee",
                                      L"Segoe UI Symbol"));
-        footer_line2_.push_back(seg(L" \u00B7 v0.3.0", 100, 100, 100,
+        footer_line2_.push_back(seg(L" \u00B7 v0.3.1", 100, 100, 100,
                                      "", "Version history (V)"));
     }
 #endif
@@ -501,7 +501,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
             line.tex = make_text_texture_w(sdl_renderer_, text, font_sz, r, g, b, &line.w, &line.h);
             return line;
         };
-        info_lines_.push_back(make_info(L"1PhoneMirror v0.3.0", 44, 255, 255, 255));
+        info_lines_.push_back(make_info(L"1PhoneMirror v0.3.1", 44, 255, 255, 255));
         info_lines_.push_back(make_info(L"AirPlay (iOS) \u00B7 scrcpy (Android)", 34, 160, 160, 160));
         info_lines_.push_back({nullptr, 0, 0}); // spacer
         info_lines_.push_back(make_info(L"(F) Fullscreen \u00B7 (M) Menu \u00B7 (L) Log \u00B7 (A) Add Android", 30, 130, 130, 130));
@@ -527,6 +527,9 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         };
         version_lines_.push_back(make_ver(L"Version History", 40, 255, 255, 255));
         version_lines_.push_back({nullptr, 0, 0}); // spacer
+        version_lines_.push_back(make_ver(L"10.05.2026 \u2013 0.3.1", 34, 200, 200, 255));
+        version_lines_.push_back(make_ver(L"Phone frame on recordings (rounded corners, transparent on GIF)", 30, 160, 160, 160));
+        version_lines_.push_back({nullptr, 0, 0});
         version_lines_.push_back(make_ver(L"10.05.2026 \u2013 0.3.0", 34, 200, 200, 255));
         version_lines_.push_back(make_ver(L"Screen recording: MP4/GIF, Ctrl+R, right-click for delay/timed", 30, 160, 160, 160));
         version_lines_.push_back({nullptr, 0, 0});
@@ -2525,10 +2528,27 @@ void Renderer::render_frame() {
 
     // Push the latest composited frame to the recorder.
     if (recorder_.is_recording() && !last_frame_data_.empty()) {
-        // Use the raw decoded frame (no phone bezel) to keep file size
-        // sensible. Phone-frame compositing is screenshot-only for now.
-        recorder_.push_frame(last_frame_data_.data(), last_frame_w_,
-                             last_frame_h_, last_frame_stride_);
+        // When the phone bezel is on, encode the same composite the user sees
+        // (rounded corners, dynamic island, bottom bar). MP4/GIF cannot carry
+        // alpha, so the area outside the rounded bezel ends up black — which
+        // reads as an intentional matte around the phone.
+        if (phone_frame_enabled_ && phone_frame_.is_generated()) {
+            int cw = 0, ch = 0;
+            uint8_t* composite = phone_frame_.composite_screenshot(
+                sdl_renderer_,
+                last_frame_data_.data(), last_frame_w_, last_frame_h_, last_frame_stride_,
+                &cw, &ch);
+            if (composite) {
+                recorder_.push_frame(composite, cw, ch, cw * 4);
+                delete[] composite;
+            } else {
+                recorder_.push_frame(last_frame_data_.data(), last_frame_w_,
+                                     last_frame_h_, last_frame_stride_);
+            }
+        } else {
+            recorder_.push_frame(last_frame_data_.data(), last_frame_w_,
+                                 last_frame_h_, last_frame_stride_);
+        }
     }
 
     // Recorder may have hit max-duration on the worker — finalise from the
@@ -4572,13 +4592,22 @@ void Renderer::start_recording() {
     cfg.format           = (settings_.record_format == 1) ? media::RecordFormat::GIF
                                                           : media::RecordFormat::MP4;
     cfg.output_path      = make_recording_path();
-    cfg.width            = last_frame_w_ & ~1;
-    cfg.height           = last_frame_h_ & ~1;
+
+    // Match the on-screen composite when the phone bezel is on, so the
+    // recording shows the same rounded-corner phone frame the user sees.
+    int src_w = last_frame_w_;
+    int src_h = last_frame_h_;
+    if (phone_frame_enabled_ && phone_frame_.is_generated()) {
+        src_w = phone_frame_.frame_width();
+        src_h = phone_frame_.frame_height();
+    }
+    cfg.width            = src_w & ~1;
+    cfg.height           = src_h & ~1;
     // Downscale GIFs aggressively — RGB8 already loses colour; smaller
     // dimensions keep the file under a few MB for 10-15 s clips.
     if (cfg.format == media::RecordFormat::GIF && cfg.width > 480) {
         int new_w = 480 & ~1;
-        int new_h = (last_frame_h_ * new_w / last_frame_w_) & ~1;
+        int new_h = (src_h * new_w / src_w) & ~1;
         cfg.width  = new_w;
         cfg.height = new_h;
     }

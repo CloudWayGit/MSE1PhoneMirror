@@ -12,6 +12,9 @@ extern "C" {
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
+#include <libavfilter/avfilter.h>
+#include <libavfilter/buffersink.h>
+#include <libavfilter/buffersrc.h>
 }
 
 namespace openmirror::media {
@@ -212,13 +215,15 @@ bool Recorder::init_encoder() {
             av_opt_set(codec_ctx_->priv_data, "profile", "high", 0);
         }
     } else {
-        // GIF: encode as 8-bit RGB332 (AV_PIX_FMT_RGB8). The built-in GIF
-        // encoder accepts this directly and swscale can convert RGBA->RGB8
-        // with ordered dithering, no palettegen filter required. Quality
-        // is "fine for screen-recording demos" rather than "publishable
-        // GIF art" — for higher fidelity we could swap in palettegen +
-        // paletteuse later via libavfilter.
-        target_pix_fmt = AV_PIX_FMT_RGB8;
+        // GIF: encode as PAL8. The palette is supplied per-frame by
+        // libavfilter's palettegen + paletteuse pipeline (built lazily
+        // once we know the source dimensions), so we don't install a
+        // fixed palette here. paletteuse with reserve_transparent=1 +
+        // alpha_threshold=128 gives proper 1-bit alpha on the rounded
+        // phone-frame corners while keeping a near-optimal 256-colour
+        // palette per frame — same quality as the canonical
+        // "ffmpeg -filter_complex split,palettegen,paletteuse" recipe.
+        target_pix_fmt = AV_PIX_FMT_PAL8;
         codec_ctx_->pix_fmt = target_pix_fmt;
     }
 
@@ -263,10 +268,14 @@ bool Recorder::init_encoder() {
     enc_frame_->format = target_pix_fmt;
     enc_frame_->width  = cfg_.width;
     enc_frame_->height = cfg_.height;
-    ret = av_frame_get_buffer(enc_frame_, 32);
-    if (ret < 0) {
-        set_error("av_frame_get_buffer failed: " + av_err(ret));
-        return false;
+    if (target_pix_fmt != AV_PIX_FMT_PAL8) {
+        // For YUV the encoder needs its own backing buffer. PAL8 frames
+        // come straight from the buffersink so no allocation is needed.
+        ret = av_frame_get_buffer(enc_frame_, 32);
+        if (ret < 0) {
+            set_error("av_frame_get_buffer failed: " + av_err(ret));
+            return false;
+        }
     }
 
     // sws_ is created lazily on the first frame because the source size
@@ -316,6 +325,9 @@ void Recorder::teardown_encoder() {
         }
     }
     if (sws_)        { sws_freeContext(sws_); sws_ = nullptr; }
+    if (filt_in_)    { av_frame_free(&filt_in_); }
+    if (filt_out_)   { av_frame_free(&filt_out_); }
+    if (filter_graph_) { avfilter_graph_free(&filter_graph_); buffersrc_ = nullptr; buffersink_ = nullptr; }
     if (enc_frame_)  { av_frame_free(&enc_frame_); }
     if (codec_ctx_)  { avcodec_free_context(&codec_ctx_); }
     if (fmt_ctx_)    { avformat_free_context(fmt_ctx_); fmt_ctx_ = nullptr; }
@@ -338,7 +350,32 @@ void Recorder::worker_loop() {
     auto next_capture_time = std::chrono::steady_clock::now();
 
     AVPixelFormat target_pix_fmt = (cfg_.format == RecordFormat::GIF)
-        ? AV_PIX_FMT_RGB8 : AV_PIX_FMT_YUV420P;
+        ? AV_PIX_FMT_PAL8 : AV_PIX_FMT_YUV420P;
+
+    bool fatal = false;
+
+    auto push_to_filter = [&](AVFrame* in) -> bool {
+        int rc = av_buffersrc_add_frame_flags(buffersrc_, in,
+                                              AV_BUFFERSRC_FLAG_KEEP_REF);
+        if (rc < 0) {
+            set_error("av_buffersrc_add_frame failed: " + av_err(rc));
+            return false;
+        }
+        // Drain everything currently available from the sink.
+        while (true) {
+            int rr = av_buffersink_get_frame(buffersink_, filt_out_);
+            if (rr == AVERROR(EAGAIN) || rr == AVERROR_EOF) break;
+            if (rr < 0) {
+                set_error("av_buffersink_get_frame failed: " + av_err(rr));
+                return false;
+            }
+            filt_out_->pts = next_pts_++;
+            bool ok = encode_frame(filt_out_);
+            av_frame_unref(filt_out_);
+            if (!ok) return false;
+        }
+        return true;
+    };
 
     while (true) {
         QueuedFrame qf;
@@ -359,32 +396,59 @@ void Recorder::worker_loop() {
         }
         next_capture_time = now + frame_interval;
 
-        // Lazy swscale init / re-init when source dims change.
-        if (!sws_ || enc_frame_->width != cfg_.width || enc_frame_->height != cfg_.height) {
-            if (sws_) { sws_freeContext(sws_); sws_ = nullptr; }
-            sws_ = sws_getContext(qf.width, qf.height, AV_PIX_FMT_RGBA,
-                                  cfg_.width, cfg_.height, target_pix_fmt,
-                                  SWS_BILINEAR, nullptr, nullptr, nullptr);
-            if (!sws_) {
-                set_error("sws_getContext failed");
-                break;
+        if (target_pix_fmt == AV_PIX_FMT_PAL8) {
+            // GIF path: lazy filter-graph init the first time we see a
+            // source frame (we need the source size for the buffer source).
+            if (!filter_graph_) {
+                if (!init_gif_filter_graph(qf.width, qf.height)) {
+                    fatal = true; break;
+                }
             }
+
+            // Wrap the queued RGBA buffer in an AVFrame and push to the
+            // filter graph. We use KEEP_REF so the filter copies what it
+            // needs — qf goes out of scope at the end of the loop body.
+            if (!filt_in_) {
+                filt_in_ = av_frame_alloc();
+                if (!filt_in_) { set_error("av_frame_alloc filt_in failed"); fatal = true; break; }
+            }
+            av_frame_unref(filt_in_);
+            filt_in_->format = AV_PIX_FMT_RGBA;
+            filt_in_->width  = qf.width;
+            filt_in_->height = qf.height;
+            int rc = av_image_fill_arrays(filt_in_->data, filt_in_->linesize,
+                                          qf.rgba.data(), AV_PIX_FMT_RGBA,
+                                          qf.width, qf.height, 1);
+            if (rc < 0) {
+                set_error("av_image_fill_arrays failed: " + av_err(rc));
+                fatal = true; break;
+            }
+            filt_in_->pts = next_pts_; // monotonic, paletteuse cares about ordering only
+
+            if (!push_to_filter(filt_in_)) { fatal = true; break; }
+        } else {
+            // MP4 / YUV path: lazy swscale init / re-init on dim changes.
+            if (av_frame_make_writable(enc_frame_) < 0) {
+                set_error("av_frame_make_writable failed");
+                fatal = true; break;
+            }
+            if (!sws_ || enc_frame_->width != cfg_.width || enc_frame_->height != cfg_.height) {
+                if (sws_) { sws_freeContext(sws_); sws_ = nullptr; }
+                sws_ = sws_getContext(qf.width, qf.height, AV_PIX_FMT_RGBA,
+                                      cfg_.width, cfg_.height, target_pix_fmt,
+                                      SWS_BILINEAR, nullptr, nullptr, nullptr);
+                if (!sws_) {
+                    set_error("sws_getContext failed");
+                    fatal = true; break;
+                }
+            }
+            const uint8_t* src_data[1]    = { qf.rgba.data() };
+            int            src_linesize[1] = { qf.width * 4 };
+            sws_scale(sws_, src_data, src_linesize, 0, qf.height,
+                      enc_frame_->data, enc_frame_->linesize);
+            enc_frame_->pts = next_pts_++;
+            if (!encode_frame(enc_frame_)) { fatal = true; break; }
         }
-
-        // Make encoder frame writable (av_frame_make_writable).
-        if (av_frame_make_writable(enc_frame_) < 0) {
-            set_error("av_frame_make_writable failed");
-            break;
-        }
-
-        const uint8_t* src_data[1]    = { qf.rgba.data() };
-        int            src_linesize[1] = { qf.width * 4 };
-        sws_scale(sws_, src_data, src_linesize, 0, qf.height,
-                  enc_frame_->data, enc_frame_->linesize);
-
-        enc_frame_->pts = next_pts_++;
-
-        if (!encode_frame(enc_frame_)) break;
 
         // Auto-stop on max duration.
         if (cfg_.max_duration_sec > 0 &&
@@ -394,7 +458,107 @@ void Recorder::worker_loop() {
         }
     }
 
+    // Flush the filter graph (EOF -> palettegen emits last palette,
+    // paletteuse emits remaining frames).
+    if (!fatal && filter_graph_ && buffersrc_) {
+        push_to_filter(nullptr);
+    }
+
     teardown_encoder();
+}
+
+bool Recorder::init_gif_filter_graph(int src_w, int src_h) {
+    filter_graph_ = avfilter_graph_alloc();
+    if (!filter_graph_) {
+        set_error("avfilter_graph_alloc failed");
+        return false;
+    }
+
+    const AVFilter* buffersrc  = avfilter_get_by_name("buffer");
+    const AVFilter* buffersink = avfilter_get_by_name("buffersink");
+    if (!buffersrc || !buffersink) {
+        set_error("avfilter buffer/buffersink not available in this build");
+        return false;
+    }
+
+    // Buffer source: RGBA at the source dimensions.
+    char src_args[256];
+    std::snprintf(src_args, sizeof(src_args),
+                  "video_size=%dx%d:pix_fmt=%d:time_base=1/%d:pixel_aspect=1/1",
+                  src_w, src_h, AV_PIX_FMT_RGBA, cfg_.target_fps);
+    int ret = avfilter_graph_create_filter(&buffersrc_, buffersrc, "in",
+                                           src_args, nullptr, filter_graph_);
+    if (ret < 0) {
+        set_error("create buffer source failed: " + av_err(ret));
+        return false;
+    }
+
+    ret = avfilter_graph_create_filter(&buffersink_, buffersink, "out",
+                                       nullptr, nullptr, filter_graph_);
+    if (ret < 0) {
+        set_error("create buffer sink failed: " + av_err(ret));
+        return false;
+    }
+
+    // No sink pix_fmt constraint: paletteuse always outputs PAL8, and on
+    // some FFmpeg builds av_opt_set_int_list("pix_fmts", ...) returns
+    // EINVAL on the buffersink. We rely on paletteuse's natural output.
+
+    // Filter description: scale RGBA to target dims, split, palettegen
+    // per-frame (with reserved transparent slot), paletteuse with alpha
+    // threshold for the rounded-corner cutout. dither=bayer:bayer_scale=5
+    // gives clean gradients with a per-frame palette.
+    char filt_desc[512];
+    std::snprintf(filt_desc, sizeof(filt_desc),
+        "scale=%d:%d:flags=lanczos,split[a][b];"
+        "[a]palettegen=stats_mode=single:reserve_transparent=1[p];"
+        "[b][p]paletteuse=new=1:alpha_threshold=128:dither=bayer:bayer_scale=5",
+        cfg_.width, cfg_.height);
+
+    AVFilterInOut* outputs = avfilter_inout_alloc();
+    AVFilterInOut* inputs  = avfilter_inout_alloc();
+    if (!outputs || !inputs) {
+        set_error("avfilter_inout_alloc failed");
+        if (outputs) avfilter_inout_free(&outputs);
+        if (inputs)  avfilter_inout_free(&inputs);
+        return false;
+    }
+
+    outputs->name       = av_strdup("in");
+    outputs->filter_ctx = buffersrc_;
+    outputs->pad_idx    = 0;
+    outputs->next       = nullptr;
+
+    inputs->name       = av_strdup("out");
+    inputs->filter_ctx = buffersink_;
+    inputs->pad_idx    = 0;
+    inputs->next       = nullptr;
+
+    ret = avfilter_graph_parse_ptr(filter_graph_, filt_desc,
+                                   &inputs, &outputs, nullptr);
+    avfilter_inout_free(&inputs);
+    avfilter_inout_free(&outputs);
+    if (ret < 0) {
+        set_error("avfilter_graph_parse_ptr failed: " + av_err(ret));
+        return false;
+    }
+
+    ret = avfilter_graph_config(filter_graph_, nullptr);
+    if (ret < 0) {
+        set_error("avfilter_graph_config failed: " + av_err(ret));
+        return false;
+    }
+
+    filt_out_ = av_frame_alloc();
+    if (!filt_out_) {
+        set_error("av_frame_alloc filt_out failed");
+        return false;
+    }
+
+    std::cout << "[Recorder] GIF filter graph: " << src_w << "x" << src_h
+              << " RGBA -> " << cfg_.width << "x" << cfg_.height
+              << " PAL8 (palettegen+paletteuse, per-frame palette)\n";
+    return true;
 }
 
 } // namespace openmirror::media

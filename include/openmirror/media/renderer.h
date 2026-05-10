@@ -285,6 +285,8 @@ private:
     BtnRect settings_toggle_save_btn_;
     BtnRect settings_toggle_clip_btn_;
     BtnRect settings_toggle_compname_btn_;
+    BtnRect settings_fmt_mp4_btn_;
+    BtnRect settings_fmt_gif_btn_;
     void draw_settings_panel();
     void apply_bezel_color(uint8_t r, uint8_t g, uint8_t b);
     // Drawer / sub-panel base colour derived from the current bezel colour

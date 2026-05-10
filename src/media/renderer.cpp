@@ -479,6 +479,14 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         footer_line2_.push_back(seg(L" ", 100, 100, 100));
         footer_line2_.push_back(seg(L"Simon Skotheimsvik, MVP", 100, 100, 100,
                                      "https://linktr.ee/simonskotheimsvik", "More info of Simon"));
+        // Buy-me-a-coffee link — yellow coffee glyph (U+2615) sandwiched
+        // between the author name and the version number. Rendered via
+        // Segoe UI Symbol/Emoji so the glyph is present on stock Windows.
+        footer_line2_.push_back(seg(L" ", 100, 100, 100));
+        footer_line2_.push_back(seg(L"\u2615", 230, 200, 60,
+                                     "https://buymeacoffee.com/simonskothn",
+                                     "Buy me a coffee",
+                                     L"Segoe UI Symbol"));
         footer_line2_.push_back(seg(L" \u00B7 v0.3.0", 100, 100, 100,
                                      "", "Version history (V)"));
     }
@@ -949,6 +957,10 @@ void Renderer::run() {
                     } else if (record_btn_.w > 0 && in_rect(mx, my, record_btn_.x, record_btn_.y,
                                                               record_btn_.w, record_btn_.h)) {
                         target = "record";
+                    } else if (bezel_record_btn_.w > 0 &&
+                               in_rect(mx, my, bezel_record_btn_.x, bezel_record_btn_.y,
+                                       bezel_record_btn_.w, bezel_record_btn_.h)) {
+                        target = "record";
                     } else {
                         for (auto& [id, r] : source_btns_) {
                             if (r.w > 0 && in_rect(mx, my, r.x, r.y, r.w, r.h)) {
@@ -1034,16 +1046,7 @@ void Renderer::run() {
                                     pending_record_duration_sec_ = 15;
                                     record_countdown_ms_ = 0;
                                     record_toggle_requested_ = true;
-                                } else if (clicked_action == "fmt_mp4") {
-                                    settings_.record_format = 0;
-                                    settings_.save();
-                                } else if (clicked_action == "fmt_gif") {
-                                    settings_.record_format = 1;
-                                    settings_.save();
-                                } else if (clicked_action == "open") {
-                                    open_screenshot_folder();
                                 }
-                                // sep / sep2 are no-ops (separators).
                             }
                             break;
                         }
@@ -1118,6 +1121,17 @@ void Renderer::run() {
                         in_rect(mx, my, bezel_screenshot_btn_.x, bezel_screenshot_btn_.y,
                                 bezel_screenshot_btn_.w, bezel_screenshot_btn_.h)) {
                         screenshot_requested_ = true;
+                        btn_flash_ = true;
+                        btn_flash_start_ = std::chrono::steady_clock::now();
+                        break;
+                    }
+
+                    // Bezel record button (only present when the menu is
+                    // hidden — same effect as Ctrl+R / island record).
+                    if (bezel_record_btn_.w > 0 &&
+                        in_rect(mx, my, bezel_record_btn_.x, bezel_record_btn_.y,
+                                bezel_record_btn_.w, bezel_record_btn_.h)) {
+                        record_toggle_requested_ = true;
                         btn_flash_ = true;
                         btn_flash_start_ = std::chrono::steady_clock::now();
                         break;
@@ -1263,6 +1277,18 @@ void Renderer::run() {
                             if (in_rect(mx, my, settings_toggle_compname_btn_.x, settings_toggle_compname_btn_.y,
                                         settings_toggle_compname_btn_.w, settings_toggle_compname_btn_.h)) {
                                 settings_.use_computer_name = !settings_.use_computer_name;
+                                settings_.save();
+                            }
+                            if (settings_fmt_mp4_btn_.w > 0 &&
+                                in_rect(mx, my, settings_fmt_mp4_btn_.x, settings_fmt_mp4_btn_.y,
+                                        settings_fmt_mp4_btn_.w, settings_fmt_mp4_btn_.h)) {
+                                settings_.record_format = 0;
+                                settings_.save();
+                            }
+                            if (settings_fmt_gif_btn_.w > 0 &&
+                                in_rect(mx, my, settings_fmt_gif_btn_.x, settings_fmt_gif_btn_.y,
+                                        settings_fmt_gif_btn_.w, settings_fmt_gif_btn_.h)) {
+                                settings_.record_format = 1;
                                 settings_.save();
                             }
                             break;
@@ -1744,14 +1770,41 @@ void Renderer::render_frame() {
         int big = std::max(64, frame_dst_w_ / 4);
         int tw = 0, th = 0;
         SDL_Texture* t = make_text_texture(sdl_renderer_, buf, big,
-                                           255, 80, 80, &tw, &th);
+                                           255, 255, 255, &tw, &th);
         if (t) {
             // Pulse pop on each second tick.
             int phase_ms = (int)(cd_elapsed % 1000);
             float pop = 1.0f + 0.15f * std::max(0.0f, 1.0f - phase_ms / 250.0f);
             int dw = (int)(tw * pop), dh = (int)(th * pop);
-            SDL_Rect dst{frame_dst_x_ + (frame_dst_w_ - dw) / 2,
-                         frame_dst_y_ + (frame_dst_h_ - dh) / 2, dw, dh};
+            int cx = frame_dst_x_ + frame_dst_w_ / 2;
+            int cy = frame_dst_y_ + frame_dst_h_ / 2;
+            // Frosty circular backdrop — partly transparent so the
+            // mirrored content remains visible behind the digit. Soft
+            // outer halo + main translucent disc + faint inner highlight.
+            int radius = (int)(std::max(dw, dh) * 0.85f);
+            SDL_SetRenderDrawBlendMode(sdl_renderer_, SDL_BLENDMODE_BLEND);
+            for (int rr = radius + radius / 4; rr > radius; --rr) {
+                uint8_t a = (uint8_t)(20 * (radius + radius / 4 - rr) / std::max(1, radius / 4));
+                SDL_SetRenderDrawColor(sdl_renderer_, 20, 20, 30, a);
+                fill_circle(sdl_renderer_, cx, cy, rr);
+            }
+            // Main frosted disc — alpha ~95/255 keeps the underlying
+            // mirror legible while still floating the digit visually.
+            SDL_SetRenderDrawColor(sdl_renderer_, 28, 30, 40, 95);
+            fill_circle(sdl_renderer_, cx, cy, radius);
+            // Subtle inner highlight ring for a glassy edge.
+            int ring_r = radius - std::max(2, radius / 18);
+            SDL_SetRenderDrawColor(sdl_renderer_, 200, 210, 230, 45);
+            for (int rr = ring_r; rr >= ring_r - 1 && rr > 0; --rr) {
+                for (int dy = -rr; dy <= rr; ++dy) {
+                    for (int dx = -rr; dx <= rr; ++dx) {
+                        int d2 = dx * dx + dy * dy;
+                        if (d2 <= rr * rr && d2 >= (rr - 1) * (rr - 1))
+                            SDL_RenderDrawPoint(sdl_renderer_, cx + dx, cy + dy);
+                    }
+                }
+            }
+            SDL_Rect dst{cx - dw / 2, cy - dh / 2, dw, dh};
             SDL_RenderCopy(sdl_renderer_, t, nullptr, &dst);
             SDL_DestroyTexture(t);
         }
@@ -1858,6 +1911,7 @@ void Renderer::render_frame() {
     // the affordance feels continuous when the menu is toggled.
     bezel_screenshot_btn_ = {};
     bezel_close_btn_ = {};
+    bezel_record_btn_ = {};
     if (island_anim_ < 0.5f) {
         float scale_b = (float)frame_dst_w_ / phone_frame_.frame_width();
         int bezel_top = (int)(phone_frame_.screen_y() * scale_b);
@@ -1871,10 +1925,13 @@ void Renderer::render_frame() {
         int gap_full = pad_full / 2 + 2;
         int island_w = std::max(160, (int)(phone_eq_w * 0.80f));
         int island_x = svx_b + (svw_b - island_w) / 2;
-        // Order on the island (right→left): close, folder, screenshot.
+        // Order on the island (right→left): close, folder, record, screenshot.
         int ss_full_x = island_x + island_w - pad_full - btn_sz_full
-                       - 2 * (btn_sz_full + gap_full);
+                       - 3 * (btn_sz_full + gap_full);
         int ss_full_cx = ss_full_x + btn_sz_full / 2;
+        int rec_full_x = island_x + island_w - pad_full - btn_sz_full
+                        - 2 * (btn_sz_full + gap_full);
+        int rec_full_cx = rec_full_x + btn_sz_full / 2;
 
         // Mini button — sized to fit inside the top bezel with breathing room.
         int mini_sz = std::max(12, std::min(btn_sz_full * 2 / 3, bezel_top - 4));
@@ -1895,27 +1952,80 @@ void Renderer::render_frame() {
         SDL_SetRenderDrawColor(sdl_renderer_, bg, bg, bg + 5, bhov || flashing_b ? 200 : 130);
         fill_circle(sdl_renderer_, mini_x + mini_sz / 2,
                     mini_y + mini_sz / 2, mini_sz / 2);
-        // Camera glyph — same recipe as the island button (ring + center dot).
+        // White filled-dot glyph — matches the island screenshot button so
+        // the affordance reads identically whether the menu is up or down.
         int cr = std::max(2, mini_sz / 4);
         int ccx = mini_x + mini_sz / 2;
         int ccy = mini_y + mini_sz / 2;
-        uint8_t ca = flashing_b ? 255 : (bhov ? 255 : 200);
-        SDL_SetRenderDrawColor(sdl_renderer_, 255, 255, 255, ca);
-        for (int dy = -cr; dy <= cr; dy++) {
-            for (int dx = -cr; dx <= cr; dx++) {
-                int d2 = dx * dx + dy * dy;
-                if (d2 <= cr * cr && d2 >= (cr - 1) * (cr - 1))
-                    SDL_RenderDrawPoint(sdl_renderer_, ccx + dx, ccy + dy);
-            }
-        }
-        int dot = std::max(1, cr / 3);
-        fill_circle(sdl_renderer_, ccx, ccy, dot);
+        uint8_t ca = flashing_b ? 255 : (bhov ? 255 : 220);
+        SDL_SetRenderDrawColor(sdl_renderer_, 240, 240, 240, ca);
+        fill_circle(sdl_renderer_, ccx, ccy, cr);
 
         if (bhov) {
             bezel_hover_key = "bezel_ss";
             bezel_hover_text = "Screenshot (Ctrl+S)";
             bezel_hover_ax = ccx;
             bezel_hover_ay = mini_y + mini_sz + 4;
+        }
+
+        // Bezel record button — same horizontal position as the island
+        // record button, same red filled-dot / square language.
+        int rec_mini_x = rec_full_cx - mini_sz / 2;
+        int rec_mini_y = mini_y;
+        bezel_record_btn_ = {rec_mini_x, rec_mini_y, mini_sz, mini_sz};
+        bool rhov = in_rect(bmx, bmy, rec_mini_x, rec_mini_y, mini_sz, mini_sz);
+        bool rec_active_b = recorder_.is_recording();
+        bool rec_count_b  = (record_countdown_ms_ > 0 && !rec_active_b);
+        float rec_pulse_b = 1.0f;
+        if (rec_active_b) {
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now_b.time_since_epoch()).count();
+            rec_pulse_b = 0.55f + 0.45f * (float)std::abs(std::sin(ms * 0.005));
+        }
+        uint8_t rbg_r = rec_active_b ? (uint8_t)(110 * rec_pulse_b + 60)
+                                     : (rhov ? 80 : 40);
+        uint8_t rbg_g = rhov ? 35 : 35;
+        uint8_t rbg_b = rhov ? 35 : 40;
+        SDL_SetRenderDrawColor(sdl_renderer_, rbg_r, rbg_g, rbg_b,
+                               rhov || rec_active_b ? 200 : 130);
+        fill_circle(sdl_renderer_, rec_mini_x + mini_sz / 2,
+                    rec_mini_y + mini_sz / 2, mini_sz / 2);
+        int rrr = std::max(2, mini_sz / 4);
+        int rrcx = rec_mini_x + mini_sz / 2;
+        int rrcy = rec_mini_y + mini_sz / 2;
+        uint8_t ra = rec_active_b ? 255 : (rhov ? 240 : 210);
+        SDL_SetRenderDrawColor(sdl_renderer_, 235, 80, 80, ra);
+        if (rec_active_b) {
+            SDL_Rect sqr{rrcx - rrr, rrcy - rrr, rrr * 2, rrr * 2};
+            SDL_RenderFillRect(sdl_renderer_, &sqr);
+        } else {
+            fill_circle(sdl_renderer_, rrcx, rrcy, rrr);
+            if (rec_count_b) {
+                int ring = rrr + 2;
+                SDL_SetRenderDrawColor(sdl_renderer_, 240, 240, 240, 220);
+                for (int dy = -ring; dy <= ring; dy++) {
+                    for (int dx = -ring; dx <= ring; dx++) {
+                        int d2 = dx * dx + dy * dy;
+                        if (d2 <= ring * ring && d2 >= (ring - 1) * (ring - 1))
+                            SDL_RenderDrawPoint(sdl_renderer_, rrcx + dx, rrcy + dy);
+                    }
+                }
+            }
+        }
+        if (rhov) {
+            bezel_hover_key = "bezel_rec";
+            if (rec_active_b) {
+                int s = (int)recorder_.elapsed_seconds();
+                static char rb[64];
+                std::snprintf(rb, sizeof(rb), "Stop recording - %d:%02d (Ctrl+R)", s / 60, s % 60);
+                bezel_hover_text = rb;
+            } else if (rec_count_b) {
+                bezel_hover_text = "Cancel countdown";
+            } else {
+                bezel_hover_text = "Record (Ctrl+R)\nRight-click for delay/timed";
+            }
+            bezel_hover_ax = rrcx;
+            bezel_hover_ay = rec_mini_y + mini_sz + 4;
         }
 
         // Bezel close button — same vertical/horizontal placement strategy
@@ -2227,24 +2337,16 @@ void Renderer::render_frame() {
         } else if (bezel_menu_target_ == "record") {
             const bool active = recorder_.is_recording();
             const bool counting = (record_countdown_ms_ > 0 && !active);
-            // Bullet glyphs for the current format (UTF-8: U+25CF / U+25CB).
-            const char* dot_mp4 = (settings_.record_format == 0) ? "\xE2\x97\x8F" : "\xE2\x97\x8B";
-            const char* dot_gif = (settings_.record_format == 1) ? "\xE2\x97\x8F" : "\xE2\x97\x8B";
             if (active) {
                 items.push_back({"stop", "Stop recording (Ctrl+R)"});
             } else if (counting) {
                 items.push_back({"cancel", "Cancel countdown"});
             } else {
-                items.push_back({"start",     "Start now (Ctrl+R)"});
-                items.push_back({"delay5",    "Start in 5 s"});
-                items.push_back({"timed5",    "Record 5 s"});
-                items.push_back({"timed10",   "Record 10 s"});
-                items.push_back({"timed15",   "Record 15 s"});
-                items.push_back({"sep",       "\xE2\x80\x94 Format \xE2\x80\x94"});
-                items.push_back({"fmt_mp4",   std::string(dot_mp4) + "  MP4 (H.264)"});
-                items.push_back({"fmt_gif",   std::string(dot_gif) + "  GIF"});
-                items.push_back({"sep2",      "\xE2\x80\x94 \xE2\x80\x94"});
-                items.push_back({"open",      "Open recordings folder"});
+                items.push_back({"start",   "Start now (Ctrl+R)"});
+                items.push_back({"delay5",  "Start in 5 s"});
+                items.push_back({"timed5",  "Record 5 s"});
+                items.push_back({"timed10", "Record 10 s"});
+                items.push_back({"timed15", "Record 15 s"});
             }
         }
         if (items.empty()) {
@@ -2356,10 +2458,8 @@ void Renderer::render_frame() {
             bezel_menu_items_.clear();
             int row_y = draw_y + pad - line_gap;
             for (size_t i = 0; i < rendered.size(); ++i) {
-                const bool is_sep = (rendered[i].action == "sep" ||
-                                     rendered[i].action == "sep2");
                 SDL_Rect row{draw_x + pr, row_y, panel_w - pr * 2, row_h};
-                bool hov = !is_sep && in_rect(mmx, mmy, row.x, row.y, row.w, row.h);
+                bool hov = in_rect(mmx, mmy, row.x, row.y, row.w, row.h);
                 if (hov && bezel_menu_anim_ >= 0.5f) {
                     SDL_SetRenderDrawColor(sdl_renderer_, 70, 70, 80, alpha);
                     SDL_RenderFillRect(sdl_renderer_, &row);
@@ -2369,19 +2469,16 @@ void Renderer::render_frame() {
                     int dh = rendered[i].h;
                     SDL_Rect td{draw_x + (panel_w - dw) / 2,
                                 row.y + (row_h - dh) / 2, dw, dh};
-                    SDL_SetTextureAlphaMod(rendered[i].tex, is_sep ? (uint8_t)(text_alpha / 2) : text_alpha);
+                    SDL_SetTextureAlphaMod(rendered[i].tex, text_alpha);
                     SDL_RenderCopy(sdl_renderer_, rendered[i].tex, nullptr, &td);
                     SDL_DestroyTexture(rendered[i].tex);
                 }
                 // Hit-rect uses the FINAL panel position so clicks line up
-                // even mid-animation. Separators get a zero-width rect so
-                // clicks pass through them.
+                // even mid-animation.
                 bezel_menu_items_.emplace_back(
                     rendered[i].action,
-                    is_sep ? BtnRect{}
-                           : BtnRect{panel_x + pr,
-                                     panel_y + (pad - line_gap) + (int)i * row_h,
-                                     panel_w - pr * 2, row_h});
+                    BtnRect{panel_x + pr, panel_y + (pad - line_gap) + (int)i * row_h,
+                            panel_w - pr * 2, row_h});
                 row_y += row_h;
             }
         }
@@ -2760,26 +2857,19 @@ void Renderer::draw_island() {
         }
     }
 
-    // Screenshot button
+    // Screenshot button — filled white dot, mirroring the record button's
+    // visual language so the two camera/record affordances read as a pair.
     bx -= btn_sz + gap;
     screenshot_btn_ = {bx, by, btn_sz, btn_sz};
     bool ss_hover = in_rect(mx, my, bx, by, btn_sz, btn_sz);
     uint8_t ss_bg = flashing ? 200 : (ss_hover ? 70 : 50);
     SDL_SetRenderDrawColor(sdl_renderer_, ss_bg, ss_bg, ss_bg + 5, 180);
     fill_circle(sdl_renderer_, bx + btn_sz / 2, by + btn_sz / 2, btn_sz / 2);
-    int cr = btn_sz / 4;
-    int ccx = bx + btn_sz / 2, ccy = by + btn_sz / 2;
-    uint8_t ca = flashing ? 255 : (ss_hover ? 255 : 200);
-    SDL_SetRenderDrawColor(sdl_renderer_, 255, 255, 255, ca);
-    for (int dy = -cr; dy <= cr; dy++) {
-        for (int dx = -cr; dx <= cr; dx++) {
-            int d2 = dx * dx + dy * dy;
-            if (d2 <= cr * cr && d2 >= (cr - 1) * (cr - 1))
-                SDL_RenderDrawPoint(sdl_renderer_, ccx + dx, ccy + dy);
-        }
-    }
-    int dot = std::max(1, cr / 3);
-    fill_circle(sdl_renderer_, ccx, ccy, dot);
+    int ssr = btn_sz / 4;
+    int sscx = bx + btn_sz / 2, sscy = by + btn_sz / 2;
+    uint8_t ss_dot_a = flashing ? 255 : (ss_hover ? 255 : 220);
+    SDL_SetRenderDrawColor(sdl_renderer_, 240, 240, 240, ss_dot_a);
+    fill_circle(sdl_renderer_, sscx, sscy, ssr);
 
     // Settings (gear) button is now drawn next to the icon on the LEFT side
     // (see block above). The right-cluster ends here with the screenshot button.
@@ -2811,7 +2901,7 @@ void Renderer::draw_island() {
                 if (recorder_.is_recording()) {
                     int s = (int)recorder_.elapsed_seconds();
                     char buf[64];
-                    std::snprintf(buf, sizeof(buf), "Stop recording \xE2\x80\xA2 %d:%02d (Ctrl+R)\nRight-click for delay/timed", s / 60, s % 60);
+                    std::snprintf(buf, sizeof(buf), "Stop recording - %d:%02d (Ctrl+R)\nRight-click for delay/timed", s / 60, s % 60);
                     rec_tip = buf;
                 } else if (record_countdown_ms_ > 0) {
                     rec_tip = "Cancel countdown";
@@ -3358,6 +3448,7 @@ void Renderer::draw_settings_panel() {
                 + row_gap + label_h + row_gap            // toggle 1
                 + label_h + row_gap                       // toggle 2
                 + label_h + row_gap                       // toggle 3 (computer name)
+                + label_h + row_gap                       // recording format row
                 + pad;
 
     // Slide animation
@@ -3477,6 +3568,59 @@ void Renderer::draw_settings_panel() {
     settings_toggle_compname_btn_ = draw_toggle(
         "Identify as computer name (restart required)",
         settings_.use_computer_name, cy);
+    cy += label_h + row_gap;
+
+    // Recording format row — two pill buttons (MP4 / GIF) on the left so
+    // all interactive controls line up vertically with the swatch grid and
+    // checkbox column above; descriptive label sits to the right.
+    {
+        int row_x  = panel_x + pad;
+        int box    = std::max(12, label_h + 2);
+        auto draw_pill = [&](const std::string& label, bool sel,
+                             int px, int py, int pw, int ph) -> BtnRect {
+            if (sel) SDL_SetRenderDrawColor(sdl_renderer_, 90, 130, 200, alpha);
+            else     SDL_SetRenderDrawColor(sdl_renderer_, 50, 50, 55, alpha);
+            SDL_Rect br = {px, py, pw, ph};
+            SDL_RenderFillRect(sdl_renderer_, &br);
+            SDL_SetRenderDrawColor(sdl_renderer_, sel ? 200 : 100,
+                                                  sel ? 220 : 100,
+                                                  sel ? 255 : 110, text_alpha);
+            SDL_RenderDrawRect(sdl_renderer_, &br);
+            int tw = 0, th = 0;
+            SDL_Texture* tt = make_text_texture(sdl_renderer_, label, label_h,
+                                                sel ? 255 : 200,
+                                                sel ? 255 : 200,
+                                                sel ? 255 : 200,
+                                                &tw, &th);
+            if (tt) {
+                SDL_SetTextureAlphaMod(tt, text_alpha);
+                SDL_Rect td{px + (pw - tw) / 2, py + (ph - th) / 2, tw, th};
+                SDL_RenderCopy(sdl_renderer_, tt, nullptr, &td);
+                SDL_DestroyTexture(tt);
+            }
+            return BtnRect{px, py, pw, ph};
+        };
+        int pill_w = std::max(48, label_h * 4);
+        int pill_gap = std::max(4, label_h / 3);
+        int pill_h = box;
+        int mp4_x = row_x;
+        int gif_x = mp4_x + pill_w + pill_gap;
+        settings_fmt_mp4_btn_ = draw_pill("MP4", settings_.record_format == 0,
+                                          mp4_x, cy, pill_w, pill_h);
+        settings_fmt_gif_btn_ = draw_pill("GIF", settings_.record_format == 1,
+                                          gif_x, cy, pill_w, pill_h);
+        // Label to the right of the pills.
+        int label_x = gif_x + pill_w + std::max(6, box / 3);
+        int lw = 0, lh = 0;
+        SDL_Texture* lt = make_text_texture(sdl_renderer_, "Recording format",
+                                            label_h, 220, 220, 225, &lw, &lh);
+        if (lt) {
+            SDL_SetTextureAlphaMod(lt, text_alpha);
+            SDL_Rect ld{label_x, cy + (pill_h - lh) / 2, lw, lh};
+            SDL_RenderCopy(sdl_renderer_, lt, nullptr, &ld);
+            SDL_DestroyTexture(lt);
+        }
+    }
 }
 
 void Renderer::clear_log_row_cache() {
@@ -4457,8 +4601,8 @@ void Renderer::start_recording() {
               << " (" << cfg.width << "x" << cfg.height
               << " @ " << cfg.target_fps << " fps)\n";
     toast_text_ = (cfg.format == media::RecordFormat::GIF)
-        ? "Recording GIF \xE2\x80\xA6"
-        : "Recording MP4 \xE2\x80\xA6";
+        ? "Recording GIF..."
+        : "Recording MP4...";
     toast_active_ = true;
     toast_start_  = std::chrono::steady_clock::now();
 }

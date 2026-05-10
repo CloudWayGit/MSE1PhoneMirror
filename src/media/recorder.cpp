@@ -212,11 +212,13 @@ bool Recorder::init_encoder() {
             av_opt_set(codec_ctx_->priv_data, "profile", "high", 0);
         }
     } else {
-        // GIF needs a palettised pixel format. The built-in GIF encoder
-        // accepts PAL8 directly; we let swscale do RGBA -> PAL8 with
-        // dithering. Quality is rough vs palettegen+paletteuse but ships
-        // without an avfilter pipeline.
-        target_pix_fmt = AV_PIX_FMT_PAL8;
+        // GIF: encode as 8-bit RGB332 (AV_PIX_FMT_RGB8). The built-in GIF
+        // encoder accepts this directly and swscale can convert RGBA->RGB8
+        // with ordered dithering, no palettegen filter required. Quality
+        // is "fine for screen-recording demos" rather than "publishable
+        // GIF art" — for higher fidelity we could swap in palettegen +
+        // paletteuse later via libavfilter.
+        target_pix_fmt = AV_PIX_FMT_RGB8;
         codec_ctx_->pix_fmt = target_pix_fmt;
     }
 
@@ -336,7 +338,7 @@ void Recorder::worker_loop() {
     auto next_capture_time = std::chrono::steady_clock::now();
 
     AVPixelFormat target_pix_fmt = (cfg_.format == RecordFormat::GIF)
-        ? AV_PIX_FMT_PAL8 : AV_PIX_FMT_YUV420P;
+        ? AV_PIX_FMT_RGB8 : AV_PIX_FMT_YUV420P;
 
     while (true) {
         QueuedFrame qf;

@@ -469,7 +469,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         footer_line1_.push_back(seg(L"1PhoneMirror by ", 120, 120, 120));
         footer_line1_.push_back(seg(L"MSEndpointMgr", 120, 120, 120,
                                      "https://msendpointmgr.com/", "Open MSEndpointMgr"));
-        // Line 2: "(c) 2026 \u266B Simon Skotheimsvik, MVP \u00B7 v0.2.5"
+        // Line 2: "(c) 2026 \u266B Simon Skotheimsvik, MVP \u00B7 v0.3.0"
         footer_line2_.push_back(seg(L"\u00A9 2026 ", 100, 100, 100));
         // Beamed-eighth-notes glyph — render via Segoe UI Symbol so it works
         // on Windows builds where the regular Segoe UI font lacks U+266B.
@@ -479,7 +479,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         footer_line2_.push_back(seg(L" ", 100, 100, 100));
         footer_line2_.push_back(seg(L"Simon Skotheimsvik, MVP", 100, 100, 100,
                                      "https://linktr.ee/simonskotheimsvik", "More info of Simon"));
-        footer_line2_.push_back(seg(L" \u00B7 v0.2.5", 100, 100, 100,
+        footer_line2_.push_back(seg(L" \u00B7 v0.3.0", 100, 100, 100,
                                      "", "Version history (V)"));
     }
 #endif
@@ -493,7 +493,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
             line.tex = make_text_texture_w(sdl_renderer_, text, font_sz, r, g, b, &line.w, &line.h);
             return line;
         };
-        info_lines_.push_back(make_info(L"1PhoneMirror v0.2.5", 44, 255, 255, 255));
+        info_lines_.push_back(make_info(L"1PhoneMirror v0.3.0", 44, 255, 255, 255));
         info_lines_.push_back(make_info(L"AirPlay (iOS) \u00B7 scrcpy (Android)", 34, 160, 160, 160));
         info_lines_.push_back({nullptr, 0, 0}); // spacer
         info_lines_.push_back(make_info(L"(F) Fullscreen \u00B7 (M) Menu \u00B7 (L) Log \u00B7 (A) Add Android", 30, 130, 130, 130));
@@ -519,6 +519,9 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         };
         version_lines_.push_back(make_ver(L"Version History", 40, 255, 255, 255));
         version_lines_.push_back({nullptr, 0, 0}); // spacer
+        version_lines_.push_back(make_ver(L"10.05.2026 \u2013 0.3.0", 34, 200, 200, 255));
+        version_lines_.push_back(make_ver(L"Screen recording: MP4/GIF, Ctrl+R, right-click for delay/timed", 30, 160, 160, 160));
+        version_lines_.push_back({nullptr, 0, 0});
         version_lines_.push_back(make_ver(L"09.05.2026 \u2013 0.2.5", 34, 200, 200, 255));
         version_lines_.push_back(make_ver(L"Info panel: copy network test PowerShell script (with MDM check)", 30, 160, 160, 160));
         version_lines_.push_back({nullptr, 0, 0});
@@ -943,6 +946,9 @@ void Renderer::run() {
                     } else if (log_btn_.w > 0 && in_rect(mx, my, log_btn_.x, log_btn_.y,
                                                           log_btn_.w, log_btn_.h)) {
                         target = "log";
+                    } else if (record_btn_.w > 0 && in_rect(mx, my, record_btn_.x, record_btn_.y,
+                                                              record_btn_.w, record_btn_.h)) {
+                        target = "record";
                     } else {
                         for (auto& [id, r] : source_btns_) {
                             if (r.w > 0 && in_rect(mx, my, r.x, r.y, r.w, r.h)) {
@@ -1004,6 +1010,40 @@ void Renderer::run() {
                             } else if (clicked_action == "clear") {
                                 openmirror::LogBuffer::instance().clear();
                                 std::cout << "[Renderer] Log cleared\n";
+                            } else if (tgt == "record") {
+                                if (clicked_action == "start") {
+                                    pending_record_duration_sec_ = 0;
+                                    record_countdown_ms_ = 0;
+                                    record_toggle_requested_ = true;
+                                } else if (clicked_action == "stop" ||
+                                           clicked_action == "cancel") {
+                                    record_toggle_requested_ = true;
+                                } else if (clicked_action == "delay5") {
+                                    pending_record_duration_sec_ = 0;
+                                    record_countdown_ms_ = 5000;
+                                    record_toggle_requested_ = true;
+                                } else if (clicked_action == "timed5") {
+                                    pending_record_duration_sec_ = 5;
+                                    record_countdown_ms_ = 0;
+                                    record_toggle_requested_ = true;
+                                } else if (clicked_action == "timed10") {
+                                    pending_record_duration_sec_ = 10;
+                                    record_countdown_ms_ = 0;
+                                    record_toggle_requested_ = true;
+                                } else if (clicked_action == "timed15") {
+                                    pending_record_duration_sec_ = 15;
+                                    record_countdown_ms_ = 0;
+                                    record_toggle_requested_ = true;
+                                } else if (clicked_action == "fmt_mp4") {
+                                    settings_.record_format = 0;
+                                    settings_.save();
+                                } else if (clicked_action == "fmt_gif") {
+                                    settings_.record_format = 1;
+                                    settings_.save();
+                                } else if (clicked_action == "open") {
+                                    open_screenshot_folder();
+                                }
+                                // sep / sep2 are no-ops (separators).
                             }
                             break;
                         }
@@ -1693,6 +1733,61 @@ void Renderer::render_frame() {
     // Phone frame overlay (on top — covers island and panel edges)
     phone_frame_.render(sdl_renderer_, frame_dst_x_, frame_dst_y_, frame_dst_w_, frame_dst_h_);
 
+    // Recording HUD — countdown digit while waiting, "REC + elapsed" chip
+    // while recording. Drawn on the screen content (under phone bezel) but
+    // above the video itself.
+    if (record_countdown_ms_ > 0 && !recorder_.is_recording() && tex_width_ > 0) {
+        auto cd_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - record_countdown_start_).count();
+        int remaining = std::max(0, (record_countdown_ms_ - (int)cd_elapsed + 999) / 1000);
+        char buf[8]; std::snprintf(buf, sizeof(buf), "%d", remaining);
+        int big = std::max(64, frame_dst_w_ / 4);
+        int tw = 0, th = 0;
+        SDL_Texture* t = make_text_texture(sdl_renderer_, buf, big,
+                                           255, 80, 80, &tw, &th);
+        if (t) {
+            // Pulse pop on each second tick.
+            int phase_ms = (int)(cd_elapsed % 1000);
+            float pop = 1.0f + 0.15f * std::max(0.0f, 1.0f - phase_ms / 250.0f);
+            int dw = (int)(tw * pop), dh = (int)(th * pop);
+            SDL_Rect dst{frame_dst_x_ + (frame_dst_w_ - dw) / 2,
+                         frame_dst_y_ + (frame_dst_h_ - dh) / 2, dw, dh};
+            SDL_RenderCopy(sdl_renderer_, t, nullptr, &dst);
+            SDL_DestroyTexture(t);
+        }
+    } else if (recorder_.is_recording() && tex_width_ > 0) {
+        int s = (int)recorder_.elapsed_seconds();
+        char buf[64]; std::snprintf(buf, sizeof(buf), "REC  %d:%02d", s / 60, s % 60);
+        int fh = std::max(14, frame_dst_w_ / 28);
+        int tw = 0, th = 0;
+        SDL_Texture* t = make_text_texture(sdl_renderer_, buf, fh,
+                                           255, 240, 240, &tw, &th);
+        if (t) {
+            int pad_ = std::max(6, fh / 2);
+            int chip_w = tw + pad_ * 2 + fh; // extra room for the dot
+            int chip_h = th + pad_;
+            int chip_x = frame_dst_x_ + std::max(8, frame_dst_w_ / 24);
+            int chip_y = frame_dst_y_ + std::max(8, frame_dst_h_ / 28);
+            // Pulsing red background.
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            float pulse = 0.55f + 0.45f * (float)std::abs(std::sin(ms * 0.005));
+            SDL_SetRenderDrawColor(sdl_renderer_,
+                                   (uint8_t)(180 * pulse + 50), 30, 30, 220);
+            SDL_Rect chip{chip_x, chip_y, chip_w, chip_h};
+            SDL_RenderFillRect(sdl_renderer_, &chip);
+            // Filled dot to the left of the text.
+            int dot_r = th / 3;
+            SDL_SetRenderDrawColor(sdl_renderer_, 255, 255, 255, 230);
+            fill_circle(sdl_renderer_, chip_x + pad_ + dot_r,
+                        chip_y + chip_h / 2, dot_r);
+            SDL_Rect td{chip_x + pad_ + dot_r * 2 + pad_ / 2,
+                        chip_y + (chip_h - th) / 2, tw, th};
+            SDL_RenderCopy(sdl_renderer_, t, nullptr, &td);
+            SDL_DestroyTexture(t);
+        }
+    }
+
     // Log panel (slides out to the left)
     if (log_panel_anim_ > 0.01f) draw_log_panel();
 
@@ -2129,6 +2224,28 @@ void Renderer::render_frame() {
                 }
             }
             items.push_back({"disconnect", "Disconnect " + name});
+        } else if (bezel_menu_target_ == "record") {
+            const bool active = recorder_.is_recording();
+            const bool counting = (record_countdown_ms_ > 0 && !active);
+            // Bullet glyphs for the current format (UTF-8: U+25CF / U+25CB).
+            const char* dot_mp4 = (settings_.record_format == 0) ? "\xE2\x97\x8F" : "\xE2\x97\x8B";
+            const char* dot_gif = (settings_.record_format == 1) ? "\xE2\x97\x8F" : "\xE2\x97\x8B";
+            if (active) {
+                items.push_back({"stop", "Stop recording (Ctrl+R)"});
+            } else if (counting) {
+                items.push_back({"cancel", "Cancel countdown"});
+            } else {
+                items.push_back({"start",     "Start now (Ctrl+R)"});
+                items.push_back({"delay5",    "Start in 5 s"});
+                items.push_back({"timed5",    "Record 5 s"});
+                items.push_back({"timed10",   "Record 10 s"});
+                items.push_back({"timed15",   "Record 15 s"});
+                items.push_back({"sep",       "\xE2\x80\x94 Format \xE2\x80\x94"});
+                items.push_back({"fmt_mp4",   std::string(dot_mp4) + "  MP4 (H.264)"});
+                items.push_back({"fmt_gif",   std::string(dot_gif) + "  GIF"});
+                items.push_back({"sep2",      "\xE2\x80\x94 \xE2\x80\x94"});
+                items.push_back({"open",      "Open recordings folder"});
+            }
         }
         if (items.empty()) {
             bezel_menu_visible_ = false;
@@ -2189,6 +2306,12 @@ void Renderer::render_frame() {
                 panel_x = bezel_menu_anchor_x_ - panel_w - 12;
                 panel_y = bezel_menu_anchor_y_ - panel_h / 2;
                 dx = (int)(panel_w * 0.3f);
+            } else if (bezel_menu_target_ == "record") {
+                // Record button lives in the top island — slide DOWN from
+                // the cursor so the menu doesn't crash into the window top.
+                panel_x = bezel_menu_anchor_x_ - panel_w / 2;
+                panel_y = bezel_menu_anchor_y_ + 12;
+                dy = -(int)(panel_h * 0.3f);
             } else {
                 // Sources (bottom) and fallback: slide up from the button.
                 panel_x = bezel_menu_anchor_x_ - panel_w / 2;
@@ -2233,8 +2356,10 @@ void Renderer::render_frame() {
             bezel_menu_items_.clear();
             int row_y = draw_y + pad - line_gap;
             for (size_t i = 0; i < rendered.size(); ++i) {
+                const bool is_sep = (rendered[i].action == "sep" ||
+                                     rendered[i].action == "sep2");
                 SDL_Rect row{draw_x + pr, row_y, panel_w - pr * 2, row_h};
-                bool hov = in_rect(mmx, mmy, row.x, row.y, row.w, row.h);
+                bool hov = !is_sep && in_rect(mmx, mmy, row.x, row.y, row.w, row.h);
                 if (hov && bezel_menu_anim_ >= 0.5f) {
                     SDL_SetRenderDrawColor(sdl_renderer_, 70, 70, 80, alpha);
                     SDL_RenderFillRect(sdl_renderer_, &row);
@@ -2244,16 +2369,19 @@ void Renderer::render_frame() {
                     int dh = rendered[i].h;
                     SDL_Rect td{draw_x + (panel_w - dw) / 2,
                                 row.y + (row_h - dh) / 2, dw, dh};
-                    SDL_SetTextureAlphaMod(rendered[i].tex, text_alpha);
+                    SDL_SetTextureAlphaMod(rendered[i].tex, is_sep ? (uint8_t)(text_alpha / 2) : text_alpha);
                     SDL_RenderCopy(sdl_renderer_, rendered[i].tex, nullptr, &td);
                     SDL_DestroyTexture(rendered[i].tex);
                 }
                 // Hit-rect uses the FINAL panel position so clicks line up
-                // even mid-animation.
+                // even mid-animation. Separators get a zero-width rect so
+                // clicks pass through them.
                 bezel_menu_items_.emplace_back(
                     rendered[i].action,
-                    BtnRect{panel_x + pr, panel_y + (pad - line_gap) + (int)i * row_h,
-                            panel_w - pr * 2, row_h});
+                    is_sep ? BtnRect{}
+                           : BtnRect{panel_x + pr,
+                                     panel_y + (pad - line_gap) + (int)i * row_h,
+                                     panel_w - pr * 2, row_h});
                 row_y += row_h;
             }
         }
@@ -4302,6 +4430,14 @@ void Renderer::start_recording() {
     cfg.output_path      = make_recording_path();
     cfg.width            = last_frame_w_ & ~1;
     cfg.height           = last_frame_h_ & ~1;
+    // Downscale GIFs aggressively — RGB8 already loses colour; smaller
+    // dimensions keep the file under a few MB for 10-15 s clips.
+    if (cfg.format == media::RecordFormat::GIF && cfg.width > 480) {
+        int new_w = 480 & ~1;
+        int new_h = (last_frame_h_ * new_w / last_frame_w_) & ~1;
+        cfg.width  = new_w;
+        cfg.height = new_h;
+    }
     cfg.target_fps       = (cfg.format == media::RecordFormat::GIF)
                             ? settings_.record_fps_gif
                             : settings_.record_fps_mp4;

@@ -1,18 +1,58 @@
 #include <openmirror/app.h>
 #include <openmirror/config.h>
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <thread>
 
-#if defined(ENABLE_ANDROID) && defined(_WIN32)
+#if defined(_WIN32)
+  #ifndef WIN32_LEAN_AND_MEAN
   #define WIN32_LEAN_AND_MEAN
+  #endif
   #include <windows.h>
+  #include <tlhelp32.h>
 #endif
 
 namespace openmirror {
 
 namespace {
+#if defined(_WIN32) && defined(ENABLE_ANDROID)
+// Forcibly terminate every adb.exe process (any path) on the system.
+// `adb kill-server` is unreliable from a shutting-down process: it spawns
+// another adb.exe to send the kill command, and if our process exits
+// before that subprocess finishes, the daemon survives. We need adb gone
+// because it binds UDP 5353 (mDNS) via its openscreen backend, which
+// competes with Apple Bonjour and silently breaks AirPlay discovery on
+// the next launch — the iPhone's spinning wheel never resolves until
+// the user signs out/in of Windows.
+static void kill_adb_processes() {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+    PROCESSENTRY32W pe{};
+    pe.dwSize = sizeof(pe);
+    int killed = 0;
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            if (_wcsicmp(pe.szExeFile, L"adb.exe") != 0) continue;
+            HANDLE hp = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE,
+                                    FALSE, pe.th32ProcessID);
+            if (!hp) continue;
+            if (TerminateProcess(hp, 1)) {
+                WaitForSingleObject(hp, 1000);
+                ++killed;
+            }
+            CloseHandle(hp);
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+    if (killed > 0) {
+        std::cout << "[Shutdown] Terminated " << killed
+                  << " adb.exe process(es) to release UDP 5353\n";
+    }
+}
+#endif
 #ifdef ENABLE_ANDROID
 std::string resolve_path(const std::string& cfg, const char* env,
                          const std::string& exe_relative,
@@ -94,16 +134,26 @@ bool App::init(const Config& config) {
         renderer_.set_source_provider(
             [this]() {
                 std::vector<media::Renderer::SourceEntry> out;
+                const bool airplay_is_active =
+                    (active_source_.load() == static_cast<int>(Source::AirPlay));
                 for (auto& s : airplay_.list_sources())
-                    out.push_back({s.id, s.name, s.active, s.streaming, s.paused});
+                    out.push_back({s.id, s.name,
+                                   airplay_is_active && s.active,
+                                   s.streaming, s.paused});
 #ifdef ENABLE_ANDROID
-                if (scrcpy_.is_running()) {
-                    media::Renderer::SourceEntry e;
-                    e.id        = "android";
-                    e.name      = "Android phone";
-                    e.active    = (active_source_.load() == static_cast<int>(Source::Android));
-                    e.streaming = true;
-                    out.push_back(std::move(e));
+                {
+                    std::lock_guard lk(scrcpy_mutex_);
+                    for (auto& s : scrcpy_sessions_) {
+                        if (!s || !s->receiver) continue;
+                        media::Renderer::SourceEntry e;
+                        e.id        = "android:" + s->serial;
+                        e.name      = s->model.empty() ? std::string("Android phone")
+                                                       : s->model;
+                        e.active    = (active_source_.load() == static_cast<int>(Source::Android) &&
+                                       active_android_serial_ == s->serial);
+                        e.streaming = true;
+                        out.push_back(std::move(e));
+                    }
                 }
 #endif
                 // Order by connection time: append new IDs in the order
@@ -133,7 +183,11 @@ bool App::init(const Config& config) {
             },
             [this](const std::string& id) {
 #ifdef ENABLE_ANDROID
-                if (id == "android") {
+                if (id.rfind("android:", 0) == 0) {
+                    {
+                        std::lock_guard lk(scrcpy_mutex_);
+                        active_android_serial_ = id.substr(8);
+                    }
                     active_source_.store(static_cast<int>(Source::Android));
                     return;
                 }
@@ -142,10 +196,18 @@ bool App::init(const Config& config) {
                 airplay_.set_active_source(id);
             },
             [this](const std::string& id) {
+                // Run disconnect off the UI thread — it can take seconds
+                // (joins scrcpy worker threads, spawns `adb disconnect`,
+                // closes RTSP sockets). Blocking the renderer caused
+                // "Not Responding" hangs that left iOS unable to reconnect.
 #ifdef ENABLE_ANDROID
-                if (id == "android") { android_disconnect(); return; }
+                if (id.rfind("android:", 0) == 0) {
+                    std::string serial = id.substr(8);
+                    std::thread([this, serial]() { android_disconnect(serial); }).detach();
+                    return;
+                }
 #endif
-                airplay_.disconnect_source(id);
+                std::thread([this, id]() { airplay_.disconnect_source(id); }).detach();
             });
 
         if (airplay_.start(ap_config)) {
@@ -235,17 +297,7 @@ bool App::init(const Config& config) {
         std::cout << "[App] Android: adb=" << adb_path
                   << " jar=" << (jar_path.empty() ? "<missing>" : jar_path) << "\n";
 
-        scrcpy_.set_video_callback([this](media::VideoFrame frame) {
-            int expected = static_cast<int>(Source::None);
-            active_source_.compare_exchange_strong(expected, static_cast<int>(Source::Android));
-            if (active_source_.load() == static_cast<int>(Source::Android))
-                renderer_.submit_frame(std::move(frame));
-        });
-        scrcpy_.set_disconnect_callback([this]() {
-            int expected = static_cast<int>(Source::Android);
-            if (active_source_.compare_exchange_strong(expected, static_cast<int>(Source::None)))
-                renderer_.request_reset();
-        });
+        // Per-session video routing is set up in start_android_session_().
 
         // Renderer's in-app panel calls these.
         renderer_.set_add_android_callback([this]() {
@@ -256,7 +308,122 @@ bool App::init(const Config& config) {
                    const std::string& pin, const std::string& cport) {
                 return android_pair_and_connect(ip, port, pin, cport);
             },
-            [this]() { android_disconnect(); });
+            [this]() {
+                // Run on a background thread — android_disconnect() joins
+                // the scrcpy worker and shells out to `adb disconnect`,
+                // which can take a few seconds and would otherwise stall
+                // the SDL event loop and look like an app freeze.
+                std::thread([this]() { android_disconnect(); }).detach();
+            });
+
+        // Auto-discover Android devices on the LAN by polling adb's own
+        // mDNS browser. This intentionally bypasses the IP that Samsung's
+        // Wireless Debugging screen reports (which can be the CGNAT
+        // 100.64.x.x mobile-data address) and shows the real Wi-Fi IP that
+        // adb actually sees on the local subnet.
+        renderer_.set_android_discover_callback(
+            [this]() {
+                std::vector<media::Renderer::DiscoveredAndroidDevice> out;
+                auto services = adb_.mdns_services();
+                // Also pull `adb devices -l` so we can attach a friendly
+                // model name (e.g. "SM_G781B" → "Galaxy S20 FE 5G") to any
+                // device that's currently connected via TCP/IP. Devices
+                // discovered only via mDNS (not yet paired) won't have a
+                // model and fall back to the serial-style mDNS name.
+                auto known = adb_.list_devices();
+                struct Acc {
+                    std::string name;
+                    std::string ip;
+                    std::string connect_port;
+                    std::string pair_port;
+                };
+                std::vector<Acc> acc;
+                auto split_ip_port = [](const std::string& s,
+                                        std::string& ip, std::string& port) {
+                    auto pos = s.rfind(':');
+                    if (pos == std::string::npos) { ip = s; port.clear(); }
+                    else { ip = s.substr(0, pos); port = s.substr(pos + 1); }
+                };
+                auto pretty_name = [](std::string n) {
+                    // Strip the "._adb-tls-{connect,pairing}._tcp." suffix.
+                    auto p = n.find("._adb-tls-");
+                    if (p != std::string::npos) n.resize(p);
+                    // Strip the "adb-" prefix that adb prepends.
+                    if (n.rfind("adb-", 0) == 0) n.erase(0, 4);
+                    // Strip the trailing "-XXXXXX" instance hash.
+                    auto dash = n.rfind('-');
+                    if (dash != std::string::npos &&
+                        n.size() - dash <= 8 && n.size() - dash >= 5) {
+                        n.resize(dash);
+                    }
+                    return n;
+                };
+                auto prettify_model = [](std::string m) {
+                    // adb returns model with underscores in place of spaces.
+                    for (auto& c : m) if (c == '_') c = ' ';
+                    return m;
+                };
+                for (const auto& s : services) {
+                    std::string ip, port;
+                    split_ip_port(s.ip_port, ip, port);
+                    if (ip.empty()) continue;
+                    auto it = std::find_if(acc.begin(), acc.end(),
+                        [&](const Acc& a) { return a.ip == ip; });
+                    if (it == acc.end()) {
+                        acc.push_back({pretty_name(s.name), ip, {}, {}});
+                        it = acc.end() - 1;
+                    } else if (it->name.empty()) {
+                        it->name = pretty_name(s.name);
+                    }
+                    if (s.type.find("pairing") != std::string::npos)
+                        it->pair_port = port;
+                    else
+                        it->connect_port = port;
+                }
+                // Enrich with model info from `adb devices -l` when the
+                // discovered ip:port matches an already-connected device.
+                for (auto& a : acc) {
+                    for (const auto& d : known) {
+                        if (d.model.empty()) continue;
+                        std::string dip, dport;
+                        split_ip_port(d.serial, dip, dport);
+                        if (dip == a.ip) {
+                            a.name = prettify_model(d.model);
+                            break;
+                        }
+                    }
+                }
+                // Also enrich from currently-active scrcpy sessions, which
+                // already store a friendly model name. This covers the
+                // case where a phone has just gone offline and adb's
+                // device list dropped the entry, but the user reopens the
+                // panel before our session noticed.
+                {
+                    std::lock_guard lk(scrcpy_mutex_);
+                    for (auto& a : acc) {
+                        if (!a.name.empty() && a.name.find(' ') != std::string::npos)
+                            continue; // already a friendly name
+                        for (auto& s : scrcpy_sessions_) {
+                            if (!s) continue;
+                            std::string sip, sport;
+                            split_ip_port(s->serial, sip, sport);
+                            if (sip == a.ip && !s->model.empty()) {
+                                a.name = s->model;
+                                break;
+                            }
+                        }
+                    }
+                }
+                for (auto& a : acc) {
+                    media::Renderer::DiscoveredAndroidDevice d;
+                    d.label        = a.name;
+                    d.ip           = a.ip;
+                    d.connect_port = a.connect_port;
+                    d.pair_port    = a.pair_port;
+                    out.push_back(std::move(d));
+                }
+                return out;
+            });
 
         // Re-register source provider so the Android dot also appears when
         // AirPlay is disabled (the AirPlay block registers a richer one).
@@ -264,16 +431,26 @@ bool App::init(const Config& config) {
             [this]() {
                 std::vector<media::Renderer::SourceEntry> out;
 #ifdef ENABLE_AIRPLAY
+                const bool airplay_is_active =
+                    (active_source_.load() == static_cast<int>(Source::AirPlay));
                 for (auto& s : airplay_.list_sources())
-                    out.push_back({s.id, s.name, s.active, s.streaming, s.paused});
+                    out.push_back({s.id, s.name,
+                                   airplay_is_active && s.active,
+                                   s.streaming, s.paused});
 #endif
-                if (scrcpy_.is_running()) {
-                    media::Renderer::SourceEntry e;
-                    e.id        = "android";
-                    e.name      = "Android phone";
-                    e.active    = (active_source_.load() == static_cast<int>(Source::Android));
-                    e.streaming = true;
-                    out.push_back(std::move(e));
+                {
+                    std::lock_guard lk(scrcpy_mutex_);
+                    for (auto& s : scrcpy_sessions_) {
+                        if (!s || !s->receiver) continue;
+                        media::Renderer::SourceEntry e;
+                        e.id        = "android:" + s->serial;
+                        e.name      = s->model.empty() ? std::string("Android phone")
+                                                       : s->model;
+                        e.active    = (active_source_.load() == static_cast<int>(Source::Android) &&
+                                       active_android_serial_ == s->serial);
+                        e.streaming = true;
+                        out.push_back(std::move(e));
+                    }
                 }
                 std::lock_guard lk(source_order_mutex_);
                 {
@@ -299,7 +476,11 @@ bool App::init(const Config& config) {
                 return out;
             },
             [this](const std::string& id) {
-                if (id == "android") {
+                if (id.rfind("android:", 0) == 0) {
+                    {
+                        std::lock_guard lk(scrcpy_mutex_);
+                        active_android_serial_ = id.substr(8);
+                    }
                     active_source_.store(static_cast<int>(Source::Android));
                     return;
                 }
@@ -309,19 +490,24 @@ bool App::init(const Config& config) {
 #endif
             },
             [this](const std::string& id) {
-                if (id == "android") { android_disconnect(); return; }
+                // Off-thread: see comment in the AirPlay branch above.
+                if (id.rfind("android:", 0) == 0) {
+                    std::string serial = id.substr(8);
+                    std::thread([this, serial]() { android_disconnect(serial); }).detach();
+                    return;
+                }
 #ifdef ENABLE_AIRPLAY
-                airplay_.disconnect_source(id);
+                std::thread([this, id]() { airplay_.disconnect_source(id); }).detach();
 #endif
             });
 
         // If a serial was supplied via CLI, auto-start (legacy / power-user path).
         if (!config_.android_device_serial.empty() && !jar_path.empty()) {
-            android::ScrcpyReceiver::Config sc;
-            sc.device_serial    = config_.android_device_serial;
-            sc.server_jar_path  = jar_path;
-            if (scrcpy_.start(sc, adb_))
+            std::string err;
+            if (start_android_session_(config_.android_device_serial, &err))
                 std::cout << "[App] Android scrcpy receiver active (CLI device)\n";
+            else
+                std::cerr << "[App] CLI Android start failed: " << err << "\n";
         } else {
             std::cout << "[App] Android: press A in the app to pair / connect a phone.\n";
         }
@@ -343,7 +529,44 @@ int App::run() {
 }
 
 void App::shutdown() {
+    // Idempotent: main.cpp calls shutdown() explicitly and ~App() also
+    // calls it, plus shutdown() may run on different paths (window close,
+    // signal). Double-running SDL_Quit / closing already-freed sockets has
+    // historically caused crashes after a session was disconnected.
+    bool expected = false;
+    if (!shutdown_done_.compare_exchange_strong(expected, true)) {
+        return;
+    }
     running_.store(false);
+
+#if defined(_WIN32) && defined(ENABLE_ANDROID)
+    // Kill adb FIRST, before any other teardown step. Three reasons:
+    //   1. adb's openscreen mDNS holds UDP 5353 and we MUST release it
+    //      so the iPhone can find our AirPlay service on the next launch.
+    //   2. If we wait until after scrcpy_sessions_.clear() and that hangs,
+    //      the watchdog terminates us before adb is killed and the daemon
+    //      survives.
+    //   3. Killing adb first makes scrcpy_sessions_.clear() faster because
+    //      its blocking adb subprocesses now fail immediately instead of
+    //      waiting for a server that is no longer responding.
+    kill_adb_processes();
+#endif
+
+    // Watchdog: if any teardown step blocks (e.g. Bonjour's
+    // DNSServiceRefDeallocate occasionally hangs on Windows when the
+    // service is in a degraded state), force-exit the process rather
+    // than leaving the user with a frozen window they can't close.
+    // 5 s is generous for any healthy teardown.
+    std::thread([]() {
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+        std::cerr << "[Shutdown] WATCHDOG: timed out, forcing exit\n";
+        std::cerr.flush();
+#if defined(_WIN32)
+        TerminateProcess(GetCurrentProcess(), 0);
+#else
+        std::_Exit(0);
+#endif
+    }).detach();
 
 #ifdef ENABLE_AIRPLAY
     airplay_.stop();
@@ -355,7 +578,14 @@ void App::shutdown() {
     cast_.stop();
 #endif
 #ifdef ENABLE_ANDROID
-    scrcpy_.stop();
+    scrcpy_sessions_.clear();
+#if defined(_WIN32)
+    // Final sweep: scrcpy_sessions_.clear() above (or any late renderer
+    // android-discovery callback) may have spawned a new adb.exe between
+    // the early kill at the top of shutdown() and now. Kill them again so
+    // we exit with UDP 5353 truly released.
+    kill_adb_processes();
+#endif
 #endif
 
     audio_.shutdown();

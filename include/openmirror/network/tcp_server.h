@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -49,11 +50,21 @@ public:
 
 private:
     void accept_loop();
+    void reap_finished_clients_locked();
+
+    struct ClientCtx {
+        std::thread th;
+        socket_t sock = INVALID_SOCK;
+        std::atomic<bool> done{false};
+    };
 
     socket_t listen_sock_ = INVALID_SOCK;
     std::atomic<bool> running_{false};
     std::thread accept_thread_;
     OnClientConnect on_connect_;
+
+    std::mutex clients_mutex_;
+    std::vector<std::unique_ptr<ClientCtx>> clients_;
 };
 
 } // namespace openmirror::network

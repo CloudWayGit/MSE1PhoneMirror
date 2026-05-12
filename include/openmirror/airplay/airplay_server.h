@@ -153,6 +153,11 @@ private:
     OnPinDisplay on_pin_display_;
 
     std::atomic<bool> running_{false};
+    // Guards against double-stop. Both App::shutdown() and ~AirPlayServer
+    // call stop(); without this latch the second call would re-enter
+    // mdns_.unregister() / decoder_.flush() etc. on already-freed state
+    // and crash with an access violation.
+    std::atomic<bool> stopped_{false};
     std::thread mirror_thread_;
 
     // Event listener

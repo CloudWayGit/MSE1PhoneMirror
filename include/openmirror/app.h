@@ -62,7 +62,17 @@ public:
                                          const std::string& pair_port,
                                          const std::string& pin,
                                          const std::string& connect_port = "");
-    void android_disconnect();
+    // Disconnect a single Android session by serial ("ip:port"), or all
+    // sessions if `serial` is empty.
+    void android_disconnect(const std::string& serial = {});
+
+    // One ScrcpyReceiver per connected device. Public so the helper in
+    // src/android/android_dialog.cpp can construct/own them.
+    struct AndroidSession {
+        std::string                                   serial;
+        std::string                                   model;
+        std::unique_ptr<android::ScrcpyReceiver>      receiver;
+    };
 #endif
 
 private:
@@ -93,11 +103,22 @@ private:
 #endif
 #ifdef ENABLE_ANDROID
     android::AdbController   adb_;
-    android::ScrcpyReceiver  scrcpy_;
+    // One ScrcpyReceiver per connected device. Each session owns its own
+    // decoder, worker thread and reverse-tunnel local port, so multiple
+    // Android phones can mirror simultaneously and the user picks which
+    // one is on screen via the source dots in the lower bezel.
+    std::mutex                                        scrcpy_mutex_;
+    std::vector<std::unique_ptr<AndroidSession>>      scrcpy_sessions_;
+    std::string                                       active_android_serial_;
     std::string android_jar_path_;
+
+    // Implemented in src/android/android_dialog.cpp.
+    bool start_android_session_(const std::string& serial,
+                                std::string* out_error);
 #endif
 
     std::atomic<bool> running_{false};
+    std::atomic<bool> shutdown_done_{false};
 };
 
 } // namespace openmirror

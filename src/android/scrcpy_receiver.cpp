@@ -116,7 +116,15 @@ int spawn_capture(const std::string& exe,
     }
     CloseHandle(out_r);
 
-    WaitForSingleObject(pi.hProcess, INFINITE);
+    // Bound the wait so a hung adb (known to happen after a phone
+    // disconnects, sleep/wake, or network change) can never freeze the
+    // caller. 10 s is generous for any normal adb command. If we time
+    // out we kill the child so its handles drop and we don't leak it.
+    DWORD wait_rc = WaitForSingleObject(pi.hProcess, 10000);
+    if (wait_rc == WAIT_TIMEOUT) {
+        TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, 1000);
+    }
     DWORD code = 1;
     GetExitCodeProcess(pi.hProcess, &code);
     CloseHandle(pi.hProcess);

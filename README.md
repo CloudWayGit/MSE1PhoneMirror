@@ -125,6 +125,7 @@ button on the menu (or use the Windows file dialog) to open it.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **0.3.4** | 13.05.2026 | New Android discovery routine for easy connect. |
 | **0.3.3** | 12.05.2026 | Right-click the resize grip to reset the window to its default size. |
 | **0.3.2** | 11.05.2026 | User interface fixes. |
 | **0.3.1** | 10.05.2026 | **Phone frame on recordings** — MP4 and GIF now include the phone bezel/rounded corners just like screenshots. GIF gets per-frame optimal palette via `palettegen`+`paletteuse` with **genuine transparent rounded corners**. |

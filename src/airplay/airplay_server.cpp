@@ -11,6 +11,11 @@
 #include <cinttypes>
 #include <openssl/evp.h>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 extern "C" {
 #include <libavcodec/avcodec.h>
 }
@@ -145,15 +150,40 @@ void AirPlayServer::set_audio_callback(media::OnAudioFrame cb) {
 bool AirPlayServer::start(const Config& config) {
     config_ = config;
 
-    // Generate a random MAC address for device identity
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<int> dist(0, 255);
-    for (int i = 0; i < 6; i++) {
-        hw_addr_[i] = static_cast<uint8_t>(dist(gen));
+    // Derive a STABLE MAC address (deviceID) from the machine identity.
+    // iOS caches AirPlay pairing/session state by deviceID — if the MAC
+    // changes between launches the iPhone gets stuck on the spinning
+    // "Connecting…" wheel until its cached session times out. Hashing the
+    // computer name (plus a fixed salt) gives us the same MAC every run
+    // on the same PC, while still being unique per machine.
+    {
+        std::string ident = "1PhoneMirror::AirPlay::v1::";
+#ifdef _WIN32
+        char cn[256];
+        DWORD cn_len = sizeof(cn);
+        if (GetComputerNameA(cn, &cn_len)) {
+            ident.append(cn, cn_len);
+        } else {
+            ident += config_.server_name;
+        }
+#else
+        ident += config_.server_name;
+#endif
+        // FNV-1a 64-bit, applied 6 times with a rolling byte index salt
+        // so each MAC byte gets independent entropy.
+        for (int i = 0; i < 6; i++) {
+            uint64_t h = 1469598103934665603ULL; // FNV offset basis
+            h ^= static_cast<uint8_t>('A' + i);
+            h *= 1099511628211ULL;
+            for (char c : ident) {
+                h ^= static_cast<uint8_t>(c);
+                h *= 1099511628211ULL;
+            }
+            hw_addr_[i] = static_cast<uint8_t>((h >> 32) ^ (h & 0xFF));
+        }
+        hw_addr_[0] &= 0xFE; // unicast
+        hw_addr_[0] |= 0x02; // locally administered
     }
-    hw_addr_[0] &= 0xFE; // unicast
-    hw_addr_[0] |= 0x02; // locally administered
 
     // Initialize Ed25519 keypair for pairing
     if (!pairing_.init()) {
@@ -230,6 +260,7 @@ bool AirPlayServer::start(const Config& config) {
 
     // Start mirror data receiver
     running_.store(true);
+    stopped_.store(false);
     mirror_thread_ = std::thread(&AirPlayServer::mirror_receive_loop, this);
 
     // Start event and timing listeners (used by SETUP response)
@@ -252,6 +283,10 @@ bool AirPlayServer::start(const Config& config) {
 }
 
 void AirPlayServer::stop() {
+    bool expected = false;
+    if (!stopped_.compare_exchange_strong(expected, true)) {
+        return; // already stopped
+    }
     running_.store(false);
     mdns_.unregister();
     rtsp_.stop();

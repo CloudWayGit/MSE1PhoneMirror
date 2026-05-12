@@ -223,6 +223,14 @@ private:
     SDL_Texture* waiting_tex_ = nullptr;
     int waiting_tex_w_ = 0, waiting_tex_h_ = 0;
 
+    // Per-device "waiting for screen updates from <name>" overlay shown
+    // briefly after the user switches active source. Cleared on the next
+    // incoming frame.
+    std::string pending_source_name_;
+    std::string pending_overlay_text_; // text currently baked into texture
+    SDL_Texture* pending_overlay_tex_ = nullptr;
+    int pending_overlay_w_ = 0, pending_overlay_h_ = 0;
+
     // Cast instructions
     SDL_Texture* ios_instr_tex_ = nullptr;
     int ios_instr_w_ = 0, ios_instr_h_ = 0;

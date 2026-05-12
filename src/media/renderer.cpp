@@ -469,7 +469,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         footer_line1_.push_back(seg(L"1PhoneMirror by ", 120, 120, 120));
         footer_line1_.push_back(seg(L"MSEndpointMgr", 120, 120, 120,
                                      "https://msendpointmgr.com/", "Open MSEndpointMgr"));
-        // Line 2: "(c) 2026 \u266B Simon Skotheimsvik, MVP \u00B7 v0.3.2"
+        // Line 2: "(c) 2026 \u266B Simon Skotheimsvik, MVP \u00B7 v0.3.3"
         footer_line2_.push_back(seg(L"\u00A9 2026 ", 100, 100, 100));
         // Beamed-eighth-notes glyph — render via Segoe UI Symbol so it works
         // on Windows builds where the regular Segoe UI font lacks U+266B.
@@ -487,7 +487,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
                                      "https://buymeacoffee.com/simonskothn",
                                      "Buy me a coffee",
                                      L"Segoe UI Symbol"));
-        footer_line2_.push_back(seg(L" \u00B7 v0.3.2", 100, 100, 100,
+        footer_line2_.push_back(seg(L" \u00B7 v0.3.3", 100, 100, 100,
                                      "", "Version history (V)"));
     }
 #endif
@@ -501,7 +501,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
             line.tex = make_text_texture_w(sdl_renderer_, text, font_sz, r, g, b, &line.w, &line.h);
             return line;
         };
-        info_lines_.push_back(make_info(L"1PhoneMirror v0.3.2", 44, 255, 255, 255));
+        info_lines_.push_back(make_info(L"1PhoneMirror v0.3.3", 44, 255, 255, 255));
         info_lines_.push_back(make_info(L"AirPlay (iOS) \u00B7 scrcpy (Android)", 34, 160, 160, 160));
         info_lines_.push_back({nullptr, 0, 0}); // spacer
         info_lines_.push_back(make_info(L"(F) Fullscreen \u00B7 (M) Menu \u00B7 (L) Log \u00B7 (A) Add Android", 30, 130, 130, 130));
@@ -527,7 +527,10 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         };
         version_lines_.push_back(make_ver(L"Version History", 40, 255, 255, 255));
         version_lines_.push_back({nullptr, 0, 0}); // spacer
-        version_lines_.push_back(make_ver(L"10.05.2026 \u2013 0.3.2", 34, 200, 200, 255));
+        version_lines_.push_back(make_ver(L"12.05.2026 \u2013 0.3.3", 34, 200, 200, 255));
+        version_lines_.push_back(make_ver(L"Right-click resize grip to reset to default size", 30, 160, 160, 160));
+        version_lines_.push_back({nullptr, 0, 0});
+        version_lines_.push_back(make_ver(L"11.05.2026 \u2013 0.3.2", 34, 200, 200, 255));
         version_lines_.push_back(make_ver(L"User interface fixes", 30, 160, 160, 160));
         version_lines_.push_back({nullptr, 0, 0});
         version_lines_.push_back(make_ver(L"10.05.2026 \u2013 0.3.1", 34, 200, 200, 255));
@@ -624,6 +627,7 @@ void Renderer::shutdown() {
     info_lines_.clear();
     for (auto& l : version_lines_) { if (l.tex) SDL_DestroyTexture(l.tex); }
     version_lines_.clear();
+    if (pending_overlay_tex_) { SDL_DestroyTexture(pending_overlay_tex_); pending_overlay_tex_ = nullptr; }
     if (texture_) { SDL_DestroyTexture(texture_); texture_ = nullptr; }
     if (sdl_renderer_) { SDL_DestroyRenderer(sdl_renderer_); sdl_renderer_ = nullptr; }
     if (window_) { SDL_DestroyWindow(window_); window_ = nullptr; }
@@ -967,6 +971,10 @@ void Renderer::run() {
                                in_rect(mx, my, bezel_record_btn_.x, bezel_record_btn_.y,
                                        bezel_record_btn_.w, bezel_record_btn_.h)) {
                         target = "record";
+                    } else if (phone_frame_enabled_ && resize_grip_.w > 0 &&
+                               in_rect(mx, my, resize_grip_.x, resize_grip_.y,
+                                       resize_grip_.w, resize_grip_.h)) {
+                        target = "resize";
                     } else {
                         for (auto& [id, r] : source_btns_) {
                             if (r.w > 0 && in_rect(mx, my, r.x, r.y, r.w, r.h)) {
@@ -1028,6 +1036,23 @@ void Renderer::run() {
                             } else if (clicked_action == "clear") {
                                 openmirror::LogBuffer::instance().clear();
                                 std::cout << "[Renderer] Log cleared\n";
+                            } else if (tgt == "resize" && clicked_action == "reset_size") {
+                                // Reset window to the same default size used
+                                // at first launch — based on the active
+                                // device's frame aspect ratio.
+                                int fw = phone_frame_.frame_width();
+                                int fh = phone_frame_.frame_height();
+                                if (fw > 0 && fh > 0) {
+                                    SDL_DisplayMode dm;
+                                    SDL_GetCurrentDisplayMode(0, &dm);
+                                    float s = std::min(dm.w * 0.32f / fw,
+                                                       dm.h * 0.65f / fh);
+                                    SDL_SetWindowSize(window_,
+                                                      (int)(fw * s),
+                                                      (int)(fh * s));
+                                    window_shape_set_ = false;
+                                    std::cout << "[Renderer] Reset window to default size\n";
+                                }
                             } else if (tgt == "record") {
                                 if (clicked_action == "start") {
                                     pending_record_duration_sec_ = 0;
@@ -1080,6 +1105,21 @@ void Renderer::run() {
                         bool handled = false;
                         for (auto& [id, r] : source_btns_) {
                             if (r.w > 0 && in_rect(mx, my, r.x, r.y, r.w, r.h)) {
+                                // If the user is switching to a *different*
+                                // source, show a "waiting for <name>" overlay
+                                // until the next frame arrives so the app
+                                // does not appear frozen during re-negotiation.
+                                if (get_sources_fn_) {
+                                    auto sources = get_sources_fn_();
+                                    bool is_active = false;
+                                    std::string nm;
+                                    for (auto& s : sources) {
+                                        if (s.id == id) { is_active = s.active; nm = s.name; break; }
+                                    }
+                                    if (!is_active && !nm.empty()) {
+                                        pending_source_name_ = nm;
+                                    }
+                                }
                                 if (set_active_source_fn_) set_active_source_fn_(id);
                                 handled = true;
                                 break;
@@ -1497,6 +1537,7 @@ void Renderer::run() {
             ever_received_frame_ = false;
             last_frame_data_.clear();
             last_frame_w_ = last_frame_h_ = last_frame_stride_ = 0;
+            pending_source_name_.clear();
             // Reveal the island menu again so the waiting screen offers
             // its full set of pairing/help affordances (counterpart to the
             // auto-collapse on first frame).
@@ -1550,13 +1591,16 @@ void Renderer::render_frame() {
                 window_shape_set_ = false;
                 if (phone_frame_enabled_) {
                     phone_frame_.generate(sdl_renderer_, tex_width_, tex_height_);
-                    SDL_DisplayMode dm;
-                    SDL_GetCurrentDisplayMode(0, &dm);
+                    // Preserve the user's window placement. Only adjust the
+                    // window width to match the new device's aspect ratio,
+                    // keeping the same on-screen height and top-left
+                    // position. (SDL_SetWindowSize is anchored to top-left.)
                     int fw = phone_frame_.frame_width();
                     int fh = phone_frame_.frame_height();
-                    float s = std::min(dm.w * 0.9f / fw, dm.h * 0.85f / fh);
-                    SDL_SetWindowSize(window_, (int)(fw * s), (int)(fh * s));
-                    SDL_SetWindowPosition(window_, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+                    int cur_w, cur_h;
+                    SDL_GetWindowSize(window_, &cur_w, &cur_h);
+                    float new_w = (float)cur_h * fw / fh;
+                    SDL_SetWindowSize(window_, (int)new_w, cur_h);
                 }
 
                 // A new stream started (first frame, or a different device
@@ -1579,6 +1623,9 @@ void Renderer::render_frame() {
             SDL_UpdateTexture(texture_, nullptr, pending_frame_.data, pending_frame_.stride);
             has_new_frame_ = false;
             ever_received_frame_ = true;
+            // First frame after a device switch — clear the "waiting for
+            // <name>" overlay.
+            pending_source_name_.clear();
         }
     }
 
@@ -1674,6 +1721,29 @@ void Renderer::render_frame() {
         SDL_RenderClear(sdl_renderer_);
         SDL_Rect vdst = {svx - 1, svy - 1, svw + 2, svh + 2};
         SDL_RenderCopy(sdl_renderer_, texture_, nullptr, &vdst);
+
+        // Optional "Waiting for screen updates from <name>" overlay shown
+        // briefly after a source switch and cleared on the next frame.
+        if (!pending_source_name_.empty()) {
+            std::string want = "Waiting for screen updates from " + pending_source_name_;
+            if (want != pending_overlay_text_) {
+                if (pending_overlay_tex_) SDL_DestroyTexture(pending_overlay_tex_);
+                pending_overlay_tex_ = make_text_texture(sdl_renderer_, want.c_str(),
+                    32, 235, 235, 235, &pending_overlay_w_, &pending_overlay_h_);
+                pending_overlay_text_ = want;
+            }
+            // Dim the screen area so the message stands out.
+            SDL_SetRenderDrawBlendMode(sdl_renderer_, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(sdl_renderer_, 0, 0, 0, 140);
+            SDL_RenderFillRect(sdl_renderer_, &vdst);
+            if (pending_overlay_tex_) {
+                float ts = std::min(1.0f, svw * 0.78f / (float)pending_overlay_w_);
+                int tw = (int)(pending_overlay_w_ * ts);
+                int th = (int)(pending_overlay_h_ * ts);
+                SDL_Rect tr = {svx + (svw - tw) / 2, svy + (svh - th) / 2, tw, th};
+                SDL_RenderCopy(sdl_renderer_, pending_overlay_tex_, nullptr, &tr);
+            }
+        }
     } else {
         // --- Waiting screen ---
         SDL_SetRenderDrawColor(sdl_renderer_, 0, 0, 0, 255);
@@ -2354,6 +2424,8 @@ void Renderer::render_frame() {
                 items.push_back({"timed10", "Record 10 s"});
                 items.push_back({"timed15", "Record 15 s"});
             }
+        } else if (bezel_menu_target_ == "resize") {
+            items.push_back({"reset_size", "Reset to default size"});
         }
         if (items.empty()) {
             bezel_menu_visible_ = false;

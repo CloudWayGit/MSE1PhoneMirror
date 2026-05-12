@@ -14,7 +14,51 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <dbghelp.h>
+#include <tlhelp32.h>
 #pragma comment(lib, "dbghelp.lib")
+
+// Detect and terminate any leftover 1PhoneMirror.exe process from a previous
+// run that crashed without releasing its sockets or its Bonjour registration.
+// Without this, the new instance fails to (re)bind ports 7000/7100 and the
+// iPhone's AirPlay picker keeps showing the stale advertisement, so screen
+// mirroring requests go to a dead receiver and silently time out.
+static void kill_stale_instances() {
+    DWORD self_pid = GetCurrentProcessId();
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+
+    PROCESSENTRY32W pe{};
+    pe.dwSize = sizeof(pe);
+    int killed = 0;
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            if (pe.th32ProcessID == self_pid) continue;
+            if (_wcsicmp(pe.szExeFile, L"1PhoneMirror.exe") != 0) continue;
+
+            HANDLE hp = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE,
+                                    FALSE, pe.th32ProcessID);
+            if (!hp) continue;
+            std::cerr << "[Startup] Found stale 1PhoneMirror process pid="
+                      << pe.th32ProcessID << ", terminating...\n";
+            if (TerminateProcess(hp, 1)) {
+                // Wait briefly for the OS to release sockets and the mDNS
+                // registration; 1.5 s is enough in practice.
+                WaitForSingleObject(hp, 1500);
+                ++killed;
+            }
+            CloseHandle(hp);
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+
+    if (killed > 0) {
+        // Give Winsock and Bonjour a moment to fully reclaim the ports
+        // (TCP sockets in TIME_WAIT, mDNS goodbye packets, etc.).
+        Sleep(800);
+        std::cerr << "[Startup] Reclaimed resources from " << killed
+                  << " stale instance(s)\n";
+    }
+}
 
 // Write a minidump and log a one-line summary on any unhandled SEH crash so
 // post-mortem analysis can pinpoint the failing thread/address. Dumps go to
@@ -173,11 +217,16 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
     // Install crash handler first so we capture failures during startup too.
     SetUnhandledExceptionFilter(om_unhandled_filter);
+    // Reap any leftover 1PhoneMirror.exe (from a previous crash) before we
+    // try to bind ports or register the mDNS service.
+    kill_stale_instances();
     // Initialize Winsock
     openmirror::network::TcpServer::init_winsock();
     // Check and offer to create firewall rules
     check_firewall_rules();
-    // Install log capture (tees cout to internal buffer)
+    // Install log capture (tees cout to internal buffer). File logging
+    // is opt-in via the Settings panel toggle (saved alongside the user's
+    // screenshots only for the current session).
     openmirror::LogBuffer::instance().install();
 #endif
 

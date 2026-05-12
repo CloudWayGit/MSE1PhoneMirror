@@ -325,6 +325,10 @@ struct CastReceiver::Impl {
     SSL_CTX* dtls_ctx = nullptr;
     std::string ice_ufrag;
     std::string ice_pwd;
+    // Back-pointer to CastReceiver::running_ so worker loops can exit on
+    // stop(). Needed because Impl is not an inner class of CastReceiver and
+    // doesn't otherwise have access to its owning receiver's atomic flag.
+    std::atomic<bool>* running_ref = nullptr;
 
     // Decoder for WebRTC H.264 stream
     media::Decoder decoder;
@@ -1104,10 +1108,10 @@ struct CastReceiver::Impl {
         std::vector<uint8_t> nal_buf;
         uint16_t last_seq = 0;
 
-        while (true) {
-            // Check if we should stop
-            // (this is checked via the CastReceiver's running_ flag through impl pointer)
-
+        // The owning CastReceiver passes its running_ atomic via a back-
+        // pointer so we can break out cleanly during stop(). Without this
+        // the thread loops forever and CastReceiver::stop()'s join hangs.
+        while (running_ref && running_ref->load()) {
             int n = recvfrom(udp_sock, (char*)buf, sizeof(buf), 0,
                              (sockaddr*)&remote_addr, &remote_addr_len);
             if (n <= 0) continue;
@@ -1232,6 +1236,14 @@ struct CastReceiver::Impl {
     // --- Client handler ---
 
     void handle_client(sock_t sock) {
+        // Register the socket immediately so cleanup() / stop() can force-close
+        // it if shutdown happens while we're still in peek/SSL_accept (a hung
+        // Cast handshake would otherwise leave this thread stuck forever
+        // and the join in stop() would freeze the app).
+        {
+            std::lock_guard<std::mutex> lock(client_mutex);
+            client_sock = sock;
+        }
         // Peek at the first bytes to diagnose TLS
         uint8_t peek[300] = {};
         int peeked = recv(sock, reinterpret_cast<char*>(peek), sizeof(peek), MSG_PEEK);
@@ -1313,7 +1325,7 @@ struct CastReceiver::Impl {
         {
             std::lock_guard<std::mutex> lock(client_mutex);
             client_ssl = ssl;
-            client_sock = sock;
+            // client_sock already set on entry
         }
 
         // Message loop
@@ -1411,6 +1423,7 @@ CastReceiver::~CastReceiver() {
 bool CastReceiver::start(const Config& config) {
     impl_->config = config;
     impl_->device_id = random_hex(16);
+    impl_->running_ref = &running_;
 
     uint32_t ip = get_local_ipv4();
     impl_->local_ip = ip_to_string(ip);
@@ -1476,13 +1489,35 @@ bool CastReceiver::start(const Config& config) {
 }
 
 void CastReceiver::stop() {
-    running_.store(false);
+    if (!running_.exchange(false)) {
+        // Already stopped (or never started). Don't double-cleanup — that
+        // could free SSL_CTX twice or close already-closed sockets.
+        return;
+    }
 
-    impl_->cleanup();
+    // 1) Wake the accept thread by closing the listen socket, and force-close
+    //    any in-flight client socket (SSL handshake may be hung otherwise).
+    if (impl_->listen_sock != BAD_SOCK) {
+        SOCK_CLOSE(impl_->listen_sock);
+        impl_->listen_sock = BAD_SOCK;
+    }
+    {
+        std::lock_guard<std::mutex> lock(impl_->client_mutex);
+        if (impl_->client_ssl) SSL_shutdown(impl_->client_ssl);
+        if (impl_->client_sock != BAD_SOCK) {
+            SOCK_CLOSE(impl_->client_sock);
+            impl_->client_sock = BAD_SOCK;
+        }
+    }
 
+    // 2) Join all worker threads BEFORE freeing the SSL contexts and mDNS
+    //    resources they may still be touching.
     if (impl_->accept_thread.joinable()) impl_->accept_thread.join();
     if (impl_->client_thread.joinable()) impl_->client_thread.join();
     if (impl_->webrtc_thread.joinable()) impl_->webrtc_thread.join();
+
+    // 3) Now it's safe to release SSL contexts, mDNS, etc.
+    impl_->cleanup();
 
     std::cout << "[Cast] Receiver stopped\n";
 }

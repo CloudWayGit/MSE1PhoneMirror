@@ -91,10 +91,65 @@ void TcpServer::stop() {
     if (accept_thread_.joinable()) {
         accept_thread_.join();
     }
+
+    // Wake any client handler threads still blocked in recv() by shutting
+    // down their sockets. We only shutdown (not close) here — the handler
+    // owns the socket lifetime and will close it on exit. Then join all of
+    // them so no detached thread can outlive this server (and the objects
+    // it captures via `this` in its on_connect_ lambda).
+    std::vector<std::unique_ptr<ClientCtx>> to_join;
+    {
+        std::lock_guard lk(clients_mutex_);
+        to_join.swap(clients_);
+    }
+    for (auto& c : to_join) {
+        if (c && c->sock != INVALID_SOCK) {
+#ifdef _WIN32
+            ::shutdown(c->sock, SD_BOTH);
+#else
+            ::shutdown(c->sock, SHUT_RDWR);
+#endif
+        }
+    }
+    for (auto& c : to_join) {
+        if (c && c->th.joinable()) c->th.join();
+    }
+}
+
+void TcpServer::reap_finished_clients_locked() {
+    // Caller holds clients_mutex_. Joins and removes any handler threads
+    // that have already finished (signalled via the per-client `done` flag).
+    auto it = clients_.begin();
+    while (it != clients_.end()) {
+        auto& c = *it;
+        if (c && c->done.load()) {
+            if (c->th.joinable()) c->th.join();
+            it = clients_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void TcpServer::accept_loop() {
+    // Poll with select() so we always notice running_=false on stop().
+    // Closing the listen socket from another thread on Windows does NOT
+    // reliably wake a blocking accept() — and we hit exactly that hang:
+    // shutdown reached rtsp_.stop() and never came back because the
+    // accept thread sat forever in accept(). A short select() timeout
+    // makes the loop self-tick without any platform tricks.
     while (running_.load()) {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        if (listen_sock_ == INVALID_SOCK) break;
+        FD_SET(listen_sock_, &rfds);
+        timeval tv{0, 250000}; // 250ms
+
+        int sel = select(static_cast<int>(listen_sock_) + 1,
+                         &rfds, nullptr, nullptr, &tv);
+        if (sel <= 0) continue;
+        if (!FD_ISSET(listen_sock_, &rfds)) continue;
+
         sockaddr_in client_addr{};
         int addr_len = sizeof(client_addr);
 
@@ -121,12 +176,24 @@ void TcpServer::accept_loop() {
 
         std::cout << "[TCP] Client connected: " << addr << "\n";
 
-        if (on_connect_) {
-            // Handle client in a new thread
-            std::thread([this, client, addr]() {
-                on_connect_(client, addr);
-            }).detach();
+        if (!on_connect_) {
+            close_socket(client);
+            continue;
         }
+
+        auto ctx = std::make_unique<ClientCtx>();
+        ctx->sock = client;
+        ClientCtx* raw = ctx.get();
+        ctx->th = std::thread([this, raw, addr]() {
+            on_connect_(raw->sock, addr);
+            raw->done.store(true);
+        });
+
+        std::lock_guard lk(clients_mutex_);
+        // Reap any previously-finished client threads so the vector does
+        // not grow unbounded over the lifetime of the server.
+        reap_finished_clients_locked();
+        clients_.push_back(std::move(ctx));
     }
 }
 

@@ -77,6 +77,25 @@ public:
         android_connect_fn_ = std::move(connect);
         android_disconnect_fn_ = std::move(disc);
     }
+
+    // Background discovery of Android Wireless-debug endpoints via the
+    // adb daemon's own mDNS browser. Returns one entry per device that is
+    // currently visible on the LAN — each may carry a connect port,
+    // a pair port (only while the phone's "Pair device with pairing
+    // code" popup is open), or both. The renderer polls this from a
+    // worker thread while the connect panel is visible and renders the
+    // results as clickable rows that pre-fill the form.
+    struct DiscoveredAndroidDevice {
+        std::string label;        // e.g. "adb-XXXXXX-YYYY"
+        std::string ip;           // "192.168.10.73"
+        std::string connect_port; // "46029" — empty if only pairing
+        std::string pair_port;    // "42379" — empty if only connect
+    };
+    using AndroidDiscoverFn = std::function<std::vector<DiscoveredAndroidDevice>()>;
+    void set_android_discover_callback(AndroidDiscoverFn fn) {
+        android_discover_fn_ = std::move(fn);
+    }
+
     void show_android_panel(); // open from outside if you want
 
 private:
@@ -293,6 +312,11 @@ private:
     BtnRect settings_toggle_save_btn_;
     BtnRect settings_toggle_clip_btn_;
     BtnRect settings_toggle_compname_btn_;
+    // Session-only toggle: when on, std::cout is mirrored to
+    // <screenshot_dir>/1PhoneMirror.log. Reset to false on every launch
+    // (intentionally NOT persisted to settings.ini).
+    BtnRect settings_toggle_log_btn_;
+    bool log_to_file_session_ = false;
     BtnRect settings_fmt_mp4_btn_;
     BtnRect settings_fmt_gif_btn_;
     void draw_settings_panel();
@@ -375,11 +399,28 @@ private:
     BtnRect android_help_close_btn_;
     BtnRect android_help_panel_rect_;
     bool android_help_visible_ = false;
+    int  android_help_scroll_ = 0;       // pixels scrolled down
+    int  android_help_max_scroll_ = 0;   // computed each draw
+    BtnRect android_help_track_rect_{};  // scrollbar track hit area
+    BtnRect android_help_thumb_rect_{};  // scrollbar thumb hit area
+    bool android_help_dragging_ = false; // mouse-drag on scrollbar thumb
+    int  android_help_drag_offset_ = 0;
     AndroidConnectFn android_connect_fn_;
     AndroidDisconnectFn android_disconnect_fn_;
     void draw_android_panel();
     void draw_android_help();
     void android_submit();
+
+    // Background mDNS discovery for the connect panel.
+    AndroidDiscoverFn android_discover_fn_;
+    std::vector<DiscoveredAndroidDevice> android_discovered_;
+    std::mutex android_discovered_mutex_;
+    std::thread android_discover_thread_;
+    std::atomic<bool> android_discover_running_{false};
+    std::atomic<bool> android_discover_in_progress_{false};
+    std::vector<BtnRect> android_discover_btns_; // hit rects per row
+    void start_android_discovery();
+    void stop_android_discovery();
 };
 
 } // namespace openmirror::media

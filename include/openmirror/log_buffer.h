@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <deque>
+#include <fstream>
 #include <map>
 #include <mutex>
 #include <string>
@@ -25,6 +26,12 @@ public:
         lines_.push_back(line);
         if (lines_.size() > max_lines_) lines_.pop_front();
         ++version_;
+        // Mirror to disk and flush immediately so a hard-kill / freeze
+        // still leaves a complete forensic log behind.
+        if (file_.is_open()) {
+            file_ << line << '\n';
+            file_.flush();
+        }
     }
 
     std::deque<std::string> get_lines() const {
@@ -54,6 +61,26 @@ public:
         original_cerr_buf_ = std::cerr.rdbuf();
         cerr_tee_buf_ = std::make_unique<TeeBuf>(this, original_cerr_buf_);
         std::cerr.rdbuf(cerr_tee_buf_.get());
+    }
+
+    // Open a log file (truncating). Subsequent add_line calls also write
+    // to disk and flush per line so a freeze/kill still preserves output.
+    bool open_file(const std::string& path) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (file_.is_open()) file_.close();
+        file_.open(path, std::ios::out | std::ios::trunc);
+        return file_.is_open();
+    }
+
+    // Close the log file (if open). Safe to call when no file is open.
+    void close_file() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (file_.is_open()) file_.close();
+    }
+
+    bool file_open() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return file_.is_open();
     }
 
     void uninstall() {
@@ -122,6 +149,7 @@ private:
     std::deque<std::string> lines_;
     std::atomic<uint64_t> version_{0};
     size_t max_lines_ = 500;
+    std::ofstream file_;
     std::streambuf* original_buf_ = nullptr;
     std::unique_ptr<TeeBuf> tee_buf_;
     std::streambuf* original_cerr_buf_ = nullptr;

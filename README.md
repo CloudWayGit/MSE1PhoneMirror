@@ -65,6 +65,12 @@ The fastest way (Windows 10 / 11):
 winget install MSEndpointMgr.1PhoneMirror
 ```
 
+Already installed? Upgrade to the latest release with:
+
+```powershell
+winget upgrade MSEndpointMgr.1PhoneMirror
+```
+
 Or grab the latest MSI directly from
 [Releases](https://github.com/MSEndpointMgr/1PhoneMirror/releases/latest).
 
@@ -147,6 +153,22 @@ button on the menu (or use the Windows file dialog) to open it.
 | **0.0.5** | 04.05.2026 | Initial ideas and implementation. |
 
 The full version log is also available in-app — press `V`.
+
+## Known app quirks
+
+A few iOS apps interact with AirPlay in unusual ways. These are app-side
+behaviours, not 1PhoneMirror bugs, but they're worth knowing about:
+
+- **TripIt** — when launched, allocates a separate landscape `1920×1080`
+  AirPlay surface and routes that to the receiver instead of mirroring
+  the on-phone view. The result is a small "second-monitor" canvas that
+  doesn't match what you see on the phone and isn't interactive.
+  1PhoneMirror keeps the phone frame stable across this canvas switch
+  (no auto-rotate to landscape) and letterboxes the surface inside the
+  phone screen rect, but the content is whatever TripIt chose to send.
+
+If you spot another app that misbehaves, please open an issue with a
+screenshot and the relevant lines from the in-app log (`L`).
 
 ## Project status
 

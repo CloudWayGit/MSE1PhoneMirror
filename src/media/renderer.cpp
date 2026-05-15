@@ -566,6 +566,10 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         info_lines_.push_back(make_info(L"(F) Fullscreen \u00B7 (M) Menu \u00B7 (L) Log \u00B7 (A) Add Android", 30, 130, 130, 130));
         info_lines_.push_back(make_info(L"(I) Info \u00B7 (V) Version \u00B7 (S) Settings \u00B7 (Esc) Quit", 30, 130, 130, 130));
         info_lines_.push_back(make_info(L"(Ctrl+S) Screenshot \u00B7 (Ctrl+Shift+S) Annotate", 30, 130, 130, 130));
+#ifdef _WIN32
+        info_lines_.push_back(make_info(L"(Ctrl+Shift+T) OCR copy text from a region", 30, 130, 130, 130));
+#endif
+        info_lines_.push_back(make_info(L"(Ctrl+R) Record \u00B7 (Ctrl+0) Reset window size", 30, 130, 130, 130));
         info_lines_.push_back(make_info(L"In log: (Ctrl+C) Copy \u00B7 (Ctrl+X) Clear", 30, 130, 130, 130));
         info_lines_.push_back({nullptr, 0, 0}); // spacer
         info_lines_.push_back(make_info(L"Network requirements", 34, 160, 160, 160));
@@ -593,7 +597,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         version_lines_.push_back(make_ver(L"Version History", 40, 255, 255, 255));
         version_lines_.push_back({nullptr, 0, 0}); // spacer
         version_lines_.push_back(make_ver(L"14.05.2026 \u2013 0.3.6", 34, 200, 200, 255));
-        version_lines_.push_back(make_ver(L"Screenshot annotation (Ctrl+Shift+S): arrow, rectangle, highlight, pixelate, text", 30, 160, 160, 160));
+        version_lines_.push_back(make_ver(L"Screenshot annotation tools (Ctrl+Shift+S)", 30, 160, 160, 160));
         version_lines_.push_back({nullptr, 0, 0});
         version_lines_.push_back(make_ver(L"13.05.2026 \u2013 0.3.5", 34, 200, 200, 255));
         version_lines_.push_back(make_ver(L"Version check and UI tunings", 30, 160, 160, 160));
@@ -698,6 +702,8 @@ void Renderer::shutdown() {
     }
     if (footer_tooltip_tex_) { SDL_DestroyTexture(footer_tooltip_tex_); footer_tooltip_tex_ = nullptr; }
     if (toast_tex_) { SDL_DestroyTexture(toast_tex_); toast_tex_ = nullptr; }
+    if (update_line1_tex_) { SDL_DestroyTexture(update_line1_tex_); update_line1_tex_ = nullptr; }
+    if (update_link_tex_) { SDL_DestroyTexture(update_link_tex_); update_link_tex_ = nullptr; }
     if (tooltip_tex_) { SDL_DestroyTexture(tooltip_tex_); tooltip_tex_ = nullptr; }
     if (bezel_tip_tex_) { SDL_DestroyTexture(bezel_tip_tex_); bezel_tip_tex_ = nullptr; }
     if (bezel_tip_tex2_) { SDL_DestroyTexture(bezel_tip_tex2_); bezel_tip_tex2_ = nullptr; }
@@ -937,6 +943,20 @@ void Renderer::run() {
                 // Ctrl+R toggles screen recording.
                 if (event.key.keysym.sym == SDLK_r && (event.key.keysym.mod & KMOD_CTRL)) {
                     record_toggle_requested_ = true;
+                    btn_flash_ = true;
+                    btn_flash_start_ = std::chrono::steady_clock::now();
+                }
+                // Ctrl+0 resets the window to its default size — matches
+                // the "reset zoom" idiom (Ctrl+0 in browsers / editors) and
+                // mirrors the right-click action on the resize grip.
+                // Explicitly exclude Alt so AltGr+0 (which types '}' on
+                // Norwegian/German/etc. layouts and arrives as Ctrl+Alt on
+                // Windows) does not get misread as Ctrl+0.
+                if ((event.key.keysym.sym == SDLK_0 || event.key.keysym.sym == SDLK_KP_0) &&
+                    (event.key.keysym.mod & KMOD_CTRL) &&
+                    !(event.key.keysym.mod & KMOD_ALT) &&
+                    !(event.key.keysym.mod & KMOD_SHIFT)) {
+                    reset_window_to_default_size();
                     btn_flash_ = true;
                     btn_flash_start_ = std::chrono::steady_clock::now();
                 }
@@ -1189,6 +1209,35 @@ void Renderer::run() {
                 if (event.button.button == SDL_BUTTON_LEFT) {
                     int mx = event.button.x, my = event.button.y;
 
+                    // Update banner — handle clicks before anything else
+                    // so the link and close glyph win over background
+                    // surfaces beneath them. Banner draws above any frame.
+                    if (update_banner_active_) {
+                        if (update_close_rect_.w > 0 &&
+                            in_rect(mx, my, update_close_rect_.x, update_close_rect_.y,
+                                    update_close_rect_.w, update_close_rect_.h)) {
+                            update_banner_active_ = false;
+                            break;
+                        }
+                        if (update_link_rect_.w > 0 &&
+                            in_rect(mx, my, update_link_rect_.x, update_link_rect_.y,
+                                    update_link_rect_.w, update_link_rect_.h)) {
+#ifdef _WIN32
+                            std::string url;
+                            {
+                                std::lock_guard<std::mutex> lk(update_check_mutex_);
+                                url = update_release_url_.empty()
+                                    ? std::string("https://github.com/MSEndpointMgr/1PhoneMirror")
+                                    : update_release_url_;
+                            }
+                            ShellExecuteA(nullptr, "open", url.c_str(),
+                                          nullptr, nullptr, SW_SHOWNORMAL);
+#endif
+                            update_banner_active_ = false;
+                            break;
+                        }
+                    }
+
                     // Bezel popup menu — handle first if visible.
                     if (bezel_menu_visible_) {
                         std::string clicked_action;
@@ -1230,26 +1279,17 @@ void Renderer::run() {
                                     begin_annotation();
                                     btn_flash_ = true;
                                     btn_flash_start_ = std::chrono::steady_clock::now();
+#ifdef _WIN32
+                                } else if (clicked_action == "ocr") {
+                                    begin_ocr();
+                                    btn_flash_ = true;
+                                    btn_flash_start_ = std::chrono::steady_clock::now();
+#endif
                                 } else if (clicked_action == "open_dir") {
                                     open_screenshot_folder();
                                 }
                             } else if (tgt == "resize" && clicked_action == "reset_size") {
-                                // Reset window to the same default size used
-                                // at first launch — based on the active
-                                // device's frame aspect ratio.
-                                int fw = phone_frame_.frame_width();
-                                int fh = phone_frame_.frame_height();
-                                if (fw > 0 && fh > 0) {
-                                    SDL_DisplayMode dm;
-                                    SDL_GetCurrentDisplayMode(0, &dm);
-                                    float s = std::min(dm.w * 0.32f / fw,
-                                                       dm.h * 0.65f / fh);
-                                    SDL_SetWindowSize(window_,
-                                                      (int)(fw * s),
-                                                      (int)(fh * s));
-                                    window_shape_set_ = false;
-                                    std::cout << "[Renderer] Reset window to default size\n";
-                                }
+                                reset_window_to_default_size();
                             } else if (tgt == "record") {
                                 if (clicked_action == "start") {
                                     pending_record_duration_sec_ = 0;
@@ -1838,35 +1878,82 @@ void Renderer::render_frame() {
         std::lock_guard lock(frame_mutex_);
         if (has_new_frame_ && pending_frame_.data) {
             if (pending_frame_.width != tex_width_ || pending_frame_.height != tex_height_) {
+                // Decide whether this texture change is a real device
+                // rotation (portrait <-> landscape) or just a same-orientation
+                // resolution switch / weird in-app canvas (e.g. TripIt
+                // reallocates a 16:9 1920x1080 AirPlay surface even when the
+                // phone is still held portrait — that is NOT a rotation).
+                //
+                // A genuine rotation swaps the previous width and height, so
+                // the new aspect ratio should be ~ 1 / prev_aspect. If the
+                // new aspect differs from that by more than ~15%, treat it
+                // as a same-device canvas change and keep the existing
+                // phone frame.
+                bool first_real_texture = (tex_width_ == 0 || tex_height_ == 0);
+                bool real_rotation = false;
+                if (!first_real_texture) {
+                    bool prev_portrait = (tex_height_ >= tex_width_);
+                    bool new_portrait  = (pending_frame_.height >= pending_frame_.width);
+                    if (prev_portrait != new_portrait) {
+                        float prev_ar = (float)tex_width_ / (float)tex_height_;
+                        float new_ar  = (float)pending_frame_.width / (float)pending_frame_.height;
+                        float expected_ar = 1.0f / prev_ar; // rotated previous
+                        if (expected_ar > 0.0f) {
+                            float rel = std::abs(new_ar - expected_ar) / expected_ar;
+                            real_rotation = (rel < 0.15f);
+                        }
+                    }
+                }
+
                 if (texture_) SDL_DestroyTexture(texture_);
                 texture_ = SDL_CreateTexture(sdl_renderer_,
                     SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
                     pending_frame_.width, pending_frame_.height);
                 tex_width_ = pending_frame_.width;
                 tex_height_ = pending_frame_.height;
-                std::cout << "[Renderer] Texture resized: " << tex_width_ << "x" << tex_height_ << "\n";
+                std::cout << "[Renderer] Texture resized: " << tex_width_ << "x" << tex_height_
+                          << (real_rotation       ? " (rotation)" :
+                              first_real_texture  ? " (initial)"  :
+                                                    " (canvas change - keeping frame)")
+                          << "\n";
 
-                window_shape_set_ = false;
-                if (phone_frame_enabled_) {
-                    phone_frame_.generate(sdl_renderer_, tex_width_, tex_height_);
-                    // Preserve the user's window placement AND the perceived
-                    // size across portrait <-> landscape rotation: keep the
-                    // SHORT side of the window the same length, then derive
-                    // the long side from the new phone aspect ratio. Without
-                    // this, rotating a 400x800 portrait would jump to
-                    // 1600x800 landscape (short side doubling).
-                    int fw = phone_frame_.frame_width();
-                    int fh = phone_frame_.frame_height();
-                    int cur_w, cur_h;
-                    SDL_GetWindowSize(window_, &cur_w, &cur_h);
-                    int prev_short = std::min(cur_w, cur_h);
-                    int new_short  = std::min(fw, fh);
-                    if (new_short <= 0) new_short = 1;
-                    float s = (float)prev_short / (float)new_short;
-                    int new_w = std::max(1, (int)std::round(fw * s));
-                    int new_h = std::max(1, (int)std::round(fh * s));
-                    SDL_SetWindowSize(window_, new_w, new_h);
+                if (real_rotation || first_real_texture) {
+                    window_shape_set_ = false;
+                    if (phone_frame_enabled_) {
+                        phone_frame_.generate(sdl_renderer_, tex_width_, tex_height_);
+                        // Preserve the user's window placement AND the perceived
+                        // size across portrait <-> landscape rotation: keep the
+                        // SHORT side of the window the same length, then derive
+                        // the long side from the new phone aspect ratio. Without
+                        // this, rotating a 400x800 portrait would jump to
+                        // 1600x800 landscape (short side doubling).
+                        int fw = phone_frame_.frame_width();
+                        int fh = phone_frame_.frame_height();
+                        int cur_w, cur_h;
+                        SDL_GetWindowSize(window_, &cur_w, &cur_h);
+                        // Exclude the log drawer (if open) from the comparison
+                        // so a wide log panel doesn't fool us into thinking the
+                        // phone area is huge — otherwise the new window grows
+                        // by log_panel_w on every connect.
+                        int cur_log_w = (int)(log_panel_full_w_ * log_panel_anim_);
+                        int phone_w   = std::max(1, cur_w - cur_log_w);
+                        int prev_short = std::min(phone_w, cur_h);
+                        int new_short  = std::min(fw, fh);
+                        if (new_short <= 0) new_short = 1;
+                        float s = (float)prev_short / (float)new_short;
+                        int new_w = std::max(1, (int)std::round(fw * s));
+                        int new_h = std::max(1, (int)std::round(fh * s));
+                        // Re-add the log drawer width so the panel stays visible
+                        // at its current animation state. The render loop will
+                        // also reconcile this on the next frame.
+                        SDL_SetWindowSize(window_, new_w + cur_log_w, new_h);
+                    }
                 }
+                // Same-orientation resolution change: keep phone_frame_ as-is.
+                // The existing window stays the same shape; the new texture
+                // (possibly a different aspect ratio than the phone frame's
+                // inner screen rect) will be rendered with letterboxing
+                // inside that rect by the existing draw code.
 
                 // A new stream started (first frame, or a different device
                 // joined) — auto-collapse the island menu so the freshly
@@ -1985,7 +2072,36 @@ void Renderer::render_frame() {
         SDL_SetRenderDrawColor(sdl_renderer_, 28, 28, 30, 255);
         SDL_RenderClear(sdl_renderer_);
         SDL_Rect vdst = {svx - 1, svy - 1, svw + 2, svh + 2};
-        SDL_RenderCopy(sdl_renderer_, texture_, nullptr, &vdst);
+        // If the texture aspect ratio differs noticeably from the phone
+        // screen rect (e.g. an app like TripIt sends a landscape 1920x1080
+        // canvas while the phone frame is portrait), aspect-fit the texture
+        // inside vdst with black bars so the content doesn't get squished.
+        if (tex_width_ > 0 && tex_height_ > 0 && vdst.w > 0 && vdst.h > 0) {
+            float tex_ar  = (float)tex_width_  / (float)tex_height_;
+            float rect_ar = (float)vdst.w      / (float)vdst.h;
+            if (std::abs(tex_ar - rect_ar) > 0.05f * rect_ar) {
+                // Fill the phone screen rect with black first.
+                SDL_SetRenderDrawColor(sdl_renderer_, 0, 0, 0, 255);
+                SDL_RenderFillRect(sdl_renderer_, &vdst);
+                int fit_w, fit_h;
+                if (tex_ar > rect_ar) {
+                    // Texture wider than rect — fit by width, letterbox.
+                    fit_w = vdst.w;
+                    fit_h = (int)std::round(vdst.w / tex_ar);
+                } else {
+                    fit_h = vdst.h;
+                    fit_w = (int)std::round(vdst.h * tex_ar);
+                }
+                SDL_Rect fit{vdst.x + (vdst.w - fit_w) / 2,
+                             vdst.y + (vdst.h - fit_h) / 2,
+                             fit_w, fit_h};
+                SDL_RenderCopy(sdl_renderer_, texture_, nullptr, &fit);
+            } else {
+                SDL_RenderCopy(sdl_renderer_, texture_, nullptr, &vdst);
+            }
+        } else {
+            SDL_RenderCopy(sdl_renderer_, texture_, nullptr, &vdst);
+        }
 
         // Optional "Waiting for screen updates from <name>" overlay shown
         // briefly after a source switch and cleared on the next frame.
@@ -2569,6 +2685,10 @@ void Renderer::render_frame() {
                 toast_active_ = false;
             }
         }
+
+        // Persistent "Update available" banner. Draws below the toast pill
+        // when both happen to be visible at the same time.
+        draw_update_banner();
     }
 
     // Log star — center right bezel
@@ -2738,7 +2858,7 @@ void Renderer::render_frame() {
         }
         if (grip_hover) {
             bezel_hover_key = "resize";
-            bezel_hover_text = "Drag to resize window";
+            bezel_hover_text = "Drag to resize\nRight-click for menu";
             bezel_hover_ax = cx - cr / 2;
             bezel_hover_ay = cy - cr / 2;
         }
@@ -2794,10 +2914,13 @@ void Renderer::render_frame() {
                 items.push_back({"timed15", "Record 15 s"});
             }
         } else if (bezel_menu_target_ == "resize") {
-            items.push_back({"reset_size", "Reset to default size"});
+            items.push_back({"reset_size", "Reset to default size (Ctrl+0)"});
         } else if (bezel_menu_target_ == "screenshot") {
             items.push_back({"shot",     "Take screenshot (Ctrl+S)"});
             items.push_back({"annotate", "Annotate screenshot (Ctrl+Shift+S)"});
+#ifdef _WIN32
+            items.push_back({"ocr",      "OCR copy text (Ctrl+Shift+T)"});
+#endif
             items.push_back({"open_dir", "Open screenshot folder"});
         }
         if (items.empty()) {
@@ -2871,6 +2994,14 @@ void Renderer::render_frame() {
                 panel_x = bezel_menu_anchor_x_ - panel_w / 2;
                 panel_y = bezel_menu_anchor_y_ + 12;
                 dy = -(int)(panel_h * 0.3f);
+            } else if (bezel_menu_target_ == "resize") {
+                // Resize grip lives in the bottom-right corner — open the
+                // menu to the LEFT of the grip so it stays inside the
+                // phone-frame area (and doesn't collide with the log panel
+                // when that is open on the right).
+                panel_x = bezel_menu_anchor_x_ - panel_w - 12;
+                panel_y = bezel_menu_anchor_y_ - panel_h / 2;
+                dx = (int)(panel_w * 0.3f);
             } else {
                 // Sources (bottom) and fallback: slide up from the button.
                 panel_x = bezel_menu_anchor_x_ - panel_w / 2;
@@ -3037,6 +3168,194 @@ bool Renderer::tooltip_ready(const std::string& key) {
         std::chrono::steady_clock::now() - hover_start_).count();
     return elapsed >= 1000;
 }
+
+#ifdef _WIN32
+// Persistent two-line "Update available" banner. Pill background mirrors
+// the standalone screenshot toast, but stacks two lines and exposes a
+// clickable GitHub link on line 2 (with the same hover-underline + 1 s
+// tooltip styling as the footer links). A small "x" in the upper-right
+// dismisses it.
+void Renderer::draw_update_banner() {
+    if (!update_banner_active_) return;
+    if (frame_dst_w_ == 0) return;
+
+    // Resolve the version string under the lock and rebuild line-1 if it
+    // changed (or on first show).
+    std::string ver;
+    {
+        std::lock_guard<std::mutex> lk(update_check_mutex_);
+        ver = update_latest_version_;
+    }
+    std::string line1 = "Update available: v" + ver;
+    static const std::string kLinkLabel = "github.com/MSEndpointMgr/1PhoneMirror";
+
+    if (line1 != update_line1_cached_) {
+        if (update_line1_tex_) { SDL_DestroyTexture(update_line1_tex_); update_line1_tex_ = nullptr; }
+        if (update_link_tex_)  { SDL_DestroyTexture(update_link_tex_);  update_link_tex_  = nullptr; }
+        update_line1_cached_ = line1;
+    }
+
+    // Render textures lazily at a font size matched to the standalone
+    // toast pill so visual weight stays consistent with sibling overlays.
+    float scale = (float)frame_dst_w_ / phone_frame_.frame_width();
+    int btn_sz_full = std::max(20, (int)(phone_frame_.screen_width() * scale / 14));
+    int fh_text = std::max(28, btn_sz_full * 2);
+
+    if (!update_line1_tex_) {
+        update_line1_tex_ = make_text_texture(sdl_renderer_, line1, fh_text,
+                                              230, 230, 230,
+                                              &update_line1_w_, &update_line1_h_);
+    }
+    if (!update_link_tex_) {
+        // Slight blue tint so the link reads as interactive even at rest,
+        // matching the convention used by the footer links.
+        update_link_tex_ = make_text_texture(sdl_renderer_, kLinkLabel, fh_text,
+                                             150, 190, 240,
+                                             &update_link_w_, &update_link_h_);
+    }
+    if (!update_line1_tex_ || !update_link_tex_) return;
+
+    // Display scale: same recipe as the standalone toast, so font size
+    // matches what the user sees on the screenshot/clipboard pill.
+    float t_scale = (float)std::max(11, btn_sz_full / 2)
+                  / std::max(28, btn_sz_full * 2);
+    int l1_w = (int)(update_line1_w_ * t_scale);
+    int l1_h = (int)(update_line1_h_ * t_scale);
+    int l2_w = (int)(update_link_w_  * t_scale);
+    int l2_h = (int)(update_link_h_  * t_scale);
+
+    int line_gap = std::max(2, l1_h / 6);
+    int pillx_pad = std::max(8, btn_sz_full / 3);
+    int pilly_pad = std::max(6, pillx_pad / 2);
+    // Reserve room for a small close glyph on the right.
+    int close_sz  = std::max(10, l1_h);
+    int close_gap = std::max(6, pillx_pad / 2);
+
+    int content_w = std::max(l1_w, l2_w);
+    int pill_w = content_w + pillx_pad * 2 + close_sz + close_gap;
+    int pill_h = l1_h + line_gap + l2_h + pilly_pad * 2;
+
+    // Center horizontally over the screen viewport, anchor near the top
+    // bezel just like the standalone toast. If the toast is also up,
+    // nudge below it so they don't overlap.
+    int svx = frame_dst_x_ + (int)(phone_frame_.screen_x() * scale);
+    int svy = frame_dst_y_ + (int)(phone_frame_.screen_y() * scale);
+    int svw = (int)(phone_frame_.screen_width() * scale);
+    int bezel_top = svy - frame_dst_y_;
+    int pill_x = svx + (svw - pill_w) / 2;
+    int pill_y = frame_dst_y_ + bezel_top + std::max(6, btn_sz_full / 4);
+    if (toast_active_) {
+        // Drop below a typical single-line toast so they stack cleanly.
+        pill_y += l1_h + pilly_pad * 2 + std::max(4, line_gap);
+    }
+
+    // Soft slide-in over the first 200 ms.
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - update_banner_start_).count();
+    float in_t = std::min(1.0f, (float)elapsed_ms / 200.0f);
+    float eased = 1.0f - (1.0f - in_t) * (1.0f - in_t) * (1.0f - in_t);
+    int slide = (int)((1.0f - eased) * pill_h * 0.4f);
+    pill_y -= slide;
+    uint8_t alpha = (uint8_t)(255 * eased);
+
+    int pr = pill_h / 2;
+    SDL_SetRenderDrawBlendMode(sdl_renderer_, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(sdl_renderer_, 20, 20, 22, (uint8_t)(alpha * 220 / 255));
+    SDL_Rect body = {pill_x + pr, pill_y, pill_w - pr * 2, pill_h};
+    SDL_RenderFillRect(sdl_renderer_, &body);
+    fill_circle(sdl_renderer_, pill_x + pr,         pill_y + pr, pr);
+    fill_circle(sdl_renderer_, pill_x + pill_w - pr, pill_y + pr, pr);
+
+    // Line 1 — plain text, centered against the content (close glyph
+    // sits to the right of the content area).
+    int content_x = pill_x + pillx_pad;
+    int l1_x = content_x + (content_w - l1_w) / 2;
+    int l1_y = pill_y + pilly_pad;
+    SDL_SetTextureAlphaMod(update_line1_tex_, alpha);
+    SDL_Rect l1_dst = {l1_x, l1_y, l1_w, l1_h};
+    SDL_RenderCopy(sdl_renderer_, update_line1_tex_, nullptr, &l1_dst);
+
+    // Line 2 — the GitHub link. Hit-rect a bit larger than the glyph
+    // bounds so it's easy to click.
+    int l2_x = content_x + (content_w - l2_w) / 2;
+    int l2_y = l1_y + l1_h + line_gap;
+    update_link_rect_ = {l2_x - 4, l2_y - 2, l2_w + 8, l2_h + 4};
+
+    int mx = 0, my = 0;
+    SDL_GetMouseState(&mx, &my);
+    bool link_hover = in_rect(mx, my, update_link_rect_.x, update_link_rect_.y,
+                              update_link_rect_.w, update_link_rect_.h);
+    // Brighten on hover; baseline tint already reads as a link.
+    if (link_hover) {
+        SDL_SetTextureColorMod(update_link_tex_, 200, 220, 255);
+    } else {
+        SDL_SetTextureColorMod(update_link_tex_, 255, 255, 255);
+    }
+    SDL_SetTextureAlphaMod(update_link_tex_, alpha);
+    SDL_Rect l2_dst = {l2_x, l2_y, l2_w, l2_h};
+    SDL_RenderCopy(sdl_renderer_, update_link_tex_, nullptr, &l2_dst);
+
+    // Hover underline — same affordance the footer links use.
+    if (link_hover) {
+        SDL_SetRenderDrawColor(sdl_renderer_, 200, 220, 255, alpha);
+        int uy = l2_y + l2_h - 1;
+        SDL_RenderDrawLine(sdl_renderer_, l2_x, uy, l2_x + l2_w, uy);
+        // Hand cursor.
+        static SDL_Cursor* hand = nullptr;
+        if (!hand) hand = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
+        if (hand) SDL_SetCursor(hand);
+    }
+
+    // Close glyph (small "x") in the upper-right of the pill.
+    int close_x = pill_x + pill_w - pillx_pad - close_sz;
+    int close_y = pill_y + pilly_pad - 1;
+    update_close_rect_ = {close_x - 4, close_y - 4, close_sz + 8, close_sz + 8};
+    bool close_hover = in_rect(mx, my, update_close_rect_.x, update_close_rect_.y,
+                               update_close_rect_.w, update_close_rect_.h);
+    uint8_t cr = close_hover ? 235 : 180;
+    uint8_t cg = close_hover ? 110 : 180;
+    uint8_t cb = close_hover ? 110 : 185;
+    SDL_SetRenderDrawColor(sdl_renderer_, cr, cg, cb, alpha);
+    int t = std::max(1, close_sz / 8);
+    auto draw_x = [&](int cx0, int cy0, int half) {
+        for (int dx = -t / 2; dx <= t / 2; ++dx)
+            for (int dy = -t / 2; dy <= t / 2; ++dy) {
+                SDL_RenderDrawLine(sdl_renderer_,
+                                   cx0 - half + dx, cy0 - half + dy,
+                                   cx0 + half + dx, cy0 + half + dy);
+                SDL_RenderDrawLine(sdl_renderer_,
+                                   cx0 - half + dx, cy0 + half + dy,
+                                   cx0 + half + dx, cy0 - half + dy);
+            }
+    };
+    draw_x(close_x + close_sz / 2, close_y + close_sz / 2, close_sz / 2 - 1);
+
+    // Hover tooltips — drive the shared 1 s delay directly via
+    // tooltip_ready() and draw_bezel_tooltip(), since this helper runs
+    // outside the bezel render block where bezel_hover_* locals live.
+    if (link_hover) {
+        if (tooltip_ready("bezel_update_link")) {
+            draw_bezel_tooltip("Open release on GitHub",
+                               update_link_rect_.x + update_link_rect_.w / 2,
+                               update_link_rect_.y + update_link_rect_.h + 4,
+                               /*prefer_below=*/true);
+        }
+    } else if (close_hover) {
+        if (tooltip_ready("bezel_update_close")) {
+            draw_bezel_tooltip("Dismiss",
+                               update_close_rect_.x + update_close_rect_.w / 2,
+                               update_close_rect_.y + update_close_rect_.h + 4,
+                               /*prefer_below=*/true);
+        }
+    }
+
+    SDL_SetTextureAlphaMod(update_line1_tex_, 255);
+    SDL_SetTextureColorMod(update_link_tex_, 255, 255, 255);
+    SDL_SetTextureAlphaMod(update_link_tex_, 255);
+}
+#else
+void Renderer::draw_update_banner() {}
+#endif
 
 void Renderer::draw_bezel_tooltip(const std::string& text, int anchor_x, int anchor_y,
                                   bool prefer_below) {
@@ -6833,9 +7152,14 @@ void Renderer::check_for_update_async(bool show_when_up_to_date) {
             }
             // Silent on launch when the network is unreachable.
         } else if (result.update_available) {
-            std::string msg = "Update available: v" + result.latest_version
-                            + " \u2014 see GitHub releases";
-            show_toast(msg, 8000);
+            // Persistent two-line banner with a clickable GitHub link
+            // (replaces the previous single-line toast). The renderer
+            // event loop will pick up the new state next frame.
+            update_banner_active_ = true;
+            update_banner_start_ = std::chrono::steady_clock::now();
+            // Force texture re-render in draw_update_banner() so the
+            // version string in the cached texture matches the new value.
+            update_line1_cached_.clear();
             std::cout << "[Update] New version available: " << result.latest_version
                       << " (current " << current << ") " << result.release_url << "\n";
         } else if (show_when_up_to_date) {
@@ -7199,6 +7523,21 @@ void Renderer::draw_pin_overlay() {
     }
 }
 
+void Renderer::reset_window_to_default_size() {
+    int fw = phone_frame_.frame_width();
+    int fh = phone_frame_.frame_height();
+    if (fw <= 0 || fh <= 0) return;
+    SDL_DisplayMode dm;
+    SDL_GetCurrentDisplayMode(0, &dm);
+    float s = std::min(dm.w * 0.32f / fw, dm.h * 0.65f / fh);
+    SDL_SetWindowSize(window_, (int)(fw * s), (int)(fh * s));
+    window_shape_set_ = false;
+    toast_text_ = "Window reset to default size";
+    toast_start_ = std::chrono::steady_clock::now();
+    toast_active_ = true;
+    std::cout << "[Renderer] Reset window to default size\n";
+}
+
 #ifdef _WIN32
 // =====================================================================
 // OCR copy (Ctrl+Shift+T)
@@ -7261,8 +7600,9 @@ void Renderer::begin_ocr() {
     ocr_drawing_ = false;
     ocr_drag_x0_ = ocr_drag_y0_ = ocr_drag_x1_ = ocr_drag_y1_ = 0;
     ocr_active_ = true;
-    toast_text_ = "OCR: drag a rectangle, Esc to cancel";
+    toast_text_ = "OCR: drag a region (Esc to cancel)";
     toast_start_ = std::chrono::steady_clock::now();
+    toast_active_ = true;
 }
 
 void Renderer::end_ocr() {
@@ -7279,22 +7619,29 @@ void Renderer::draw_ocr_overlay() {
     int win_w = 0, win_h = 0;
     SDL_GetRendererOutputSize(sdl_renderer_, &win_w, &win_h);
 
-    // Dim backdrop.
+    // Restrict the overlay to the PHONE area only (exclude the log
+    // drawer if it is open) so the dim backdrop, picture, hint and
+    // selection rect all stay within the phone window and the user can
+    // still see/use the log on the right.
+    int log_w = (int)(log_panel_full_w_ * log_panel_anim_);
+    int phone_area_w = std::max(64, win_w - log_w);
+
+    // Dim backdrop — only over the phone area.
     SDL_SetRenderDrawBlendMode(sdl_renderer_, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(sdl_renderer_, 0, 0, 0, 200);
-    SDL_Rect full{0, 0, win_w, win_h};
+    SDL_Rect full{0, 0, phone_area_w, win_h};
     SDL_RenderFillRect(sdl_renderer_, &full);
 
-    // Fit the captured composite into the window with a small margin.
+    // Fit the captured composite into the phone area with a small margin.
     int margin = 16;
-    int avail_w = std::max(64, win_w - 2 * margin);
+    int avail_w = std::max(64, phone_area_w - 2 * margin);
     int avail_h = std::max(64, win_h - 2 * margin);
     float sx = (float)avail_w / ocr_bg_w_;
     float sy = (float)avail_h / ocr_bg_h_;
     float s = std::min(sx, sy);
     ocr_dst_w_ = (int)(ocr_bg_w_ * s);
     ocr_dst_h_ = (int)(ocr_bg_h_ * s);
-    ocr_dst_x_ = (win_w - ocr_dst_w_) / 2;
+    ocr_dst_x_ = (phone_area_w - ocr_dst_w_) / 2;
     ocr_dst_y_ = (win_h - ocr_dst_h_) / 2;
 
     SDL_Rect img_dst{ocr_dst_x_, ocr_dst_y_, ocr_dst_w_, ocr_dst_h_};
@@ -7343,24 +7690,33 @@ void Renderer::draw_ocr_overlay() {
         }
     }
 
-    // Status hint at the bottom.
-    int fh = std::max(16, win_h / 36);
+    // Status hint at the top — phone-shaped windows are too narrow at the
+    // bottom for one-line text, so anchor at the top and auto-shrink the
+    // font until it fits the window width.
+    int fh = std::max(14, win_h / 42);
     std::string hint;
     if (ocr_running_.load()) {
-        hint = "OCR: recognizing...";
+        hint = "OCR: recognizing\u2026";
     } else if (ocr_drawing_) {
-        hint = "Release to recognize, Esc to cancel";
+        hint = "Release to recognize \u00B7 Esc to cancel";
     } else {
-        hint = "Click and drag to pick a region (Esc to cancel)";
+        hint = "Drag a region \u00B7 Esc to cancel";
     }
     int tw = 0, th = 0;
-    SDL_Texture* tex = make_text_texture(sdl_renderer_, hint, fh, 230, 230, 230,
-                                         &tw, &th);
+    SDL_Texture* tex = nullptr;
+    // Try shrinking the font until it fits with a 24-px side margin.
+    for (int attempt = 0; attempt < 6 && fh >= 10; ++attempt) {
+        if (tex) { SDL_DestroyTexture(tex); tex = nullptr; }
+        tex = make_text_texture(sdl_renderer_, hint, fh, 230, 230, 230, &tw, &th);
+        if (tex && tw + 24 <= phone_area_w) break;
+        fh = std::max(10, (int)(fh * 0.85f));
+    }
     if (tex) {
-        SDL_Rect bg{(win_w - tw) / 2 - 12, win_h - th - 24, tw + 24, th + 12};
+        int bg_y = 12;
+        SDL_Rect bg{(phone_area_w - tw) / 2 - 12, bg_y, tw + 24, th + 12};
         SDL_SetRenderDrawColor(sdl_renderer_, 0, 0, 0, 180);
         SDL_RenderFillRect(sdl_renderer_, &bg);
-        SDL_Rect d{(win_w - tw) / 2, win_h - th - 18, tw, th};
+        SDL_Rect d{(phone_area_w - tw) / 2, bg_y + 6, tw, th};
         SDL_RenderCopy(sdl_renderer_, tex, nullptr, &d);
         SDL_DestroyTexture(tex);
     }
@@ -7481,16 +7837,18 @@ void Renderer::process_ocr_result() {
             toast_text_ = "OCR: no text detected";
         } else {
             SDL_SetClipboardText(text.c_str());
-            // Trim the toast to a reasonable length.
-            int n = (int)text.size();
-            toast_text_ = "OCR: copied " + std::to_string(n) +
-                          " char" + (n == 1 ? "" : "s") + " to clipboard";
+            // Keep the toast short so it renders at the same font size as
+            // the screenshot/clipboard confirmations (the pill auto-shrinks
+            // when the text gets long). The recognised text is on the
+            // clipboard — no need to echo it back here.
+            toast_text_ = "Text copied to clipboard \u2014 ready to paste";
         }
     } else {
         toast_text_ = "OCR failed: " + err;
         std::cerr << "[OCR] " << err << "\n";
     }
     toast_start_ = std::chrono::steady_clock::now();
+    toast_active_ = true;
     end_ocr();
 }
 #endif // _WIN32

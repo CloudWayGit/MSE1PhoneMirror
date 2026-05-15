@@ -362,6 +362,23 @@ private:
     std::mutex update_check_mutex_;
     std::string update_latest_version_;
     std::string update_release_url_;
+
+    // Persistent two-line "Update available" banner (replaces the old
+    // single-line toast). Line 1: version notice. Line 2: clickable
+    // GitHub repo link with the same hover/tooltip behaviour as the
+    // footer links. Stays up until the user clicks the link or the close
+    // glyph.
+    bool update_banner_active_ = false;
+    std::chrono::steady_clock::time_point update_banner_start_;
+    BtnRect update_link_rect_;
+    BtnRect update_close_rect_;
+    SDL_Texture* update_line1_tex_ = nullptr;
+    int update_line1_w_ = 0, update_line1_h_ = 0;
+    SDL_Texture* update_link_tex_ = nullptr;
+    int update_link_w_ = 0, update_link_h_ = 0;
+    std::string update_line1_cached_;
+    void draw_update_banner();
+
     void draw_settings_panel();
     void apply_bezel_color(uint8_t r, uint8_t g, uint8_t b);
     // Drawer / sub-panel base colour derived from the current bezel colour
@@ -514,6 +531,11 @@ private:
     bool handle_ocr_event(const SDL_Event& ev); // returns true if consumed
     void launch_ocr_job(int ix, int iy, int iw, int ih);
     void process_ocr_result();
+
+    // Reset window to the default first-launch size based on the active
+    // device's frame aspect ratio. Shared by Ctrl+0 and the right-click
+    // "Reset to default size" menu on the resize grip.
+    void reset_window_to_default_size();
 
     // Android connect panel (in-app, themed to match info panel)
     bool android_panel_visible_ = false;

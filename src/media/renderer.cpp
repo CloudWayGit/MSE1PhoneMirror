@@ -514,9 +514,9 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
                                      "https://buymeacoffee.com/simonskothn",
                                      "Buy me a coffee",
                                      L"Segoe UI Symbol"));
-        // Line 3: " · v0.3.8" — broken onto its own line so the second
+        // Line 3: " · v0.3.9" — broken onto its own line so the second
         // line stays a comfortable width on narrow phone aspects.
-        footer_line3_.push_back(seg(L"v0.3.8", 100, 100, 100,
+        footer_line3_.push_back(seg(L"v0.3.9", 100, 100, 100,
                                      "", "Version history (V)"));
 
         // Mirror the same content for the Info panel, but baked at the
@@ -546,7 +546,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
                                            "https://buymeacoffee.com/simonskothn",
                                            "Buy me a coffee",
                                            L"Segoe UI Symbol"));
-        info_footer_line3_.push_back(iseg(L"v0.3.8", 130, 130, 130,
+        info_footer_line3_.push_back(iseg(L"v0.3.9", 130, 130, 130,
                                            "", "Version history (V)"));
     }
 #endif
@@ -560,7 +560,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
             line.tex = make_text_texture_w(sdl_renderer_, text, font_sz, r, g, b, &line.w, &line.h);
             return line;
         };
-        info_lines_.push_back(make_info(L"1PhoneMirror v0.3.8", 44, 255, 255, 255));
+        info_lines_.push_back(make_info(L"1PhoneMirror v0.3.9", 44, 255, 255, 255));
         info_lines_.push_back(make_info(L"AirPlay (iOS) \u00B7 scrcpy (Android)", 34, 160, 160, 160));
         info_lines_.push_back({nullptr, 0, 0}); // spacer
         info_lines_.push_back(make_info(L"(F) Fullscreen \u00B7 (M) Menu \u00B7 (L) Log \u00B7 (A) Add Android", 30, 130, 130, 130));
@@ -596,6 +596,9 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         };
         version_lines_.push_back(make_ver(L"Version History", 40, 255, 255, 255));
         version_lines_.push_back({nullptr, 0, 0}); // spacer
+        version_lines_.push_back(make_ver(L"17.05.2026 \u2013 0.3.9", 34, 200, 200, 255));
+        version_lines_.push_back(make_ver(L"Small telemetry in settings", 30, 160, 160, 160));
+        version_lines_.push_back({nullptr, 0, 0});
         version_lines_.push_back(make_ver(L"16.05.2026 \u2013 0.3.8", 34, 200, 200, 255));
         version_lines_.push_back(make_ver(L"Tuned for larger screens from macOS", 30, 160, 160, 160));
         version_lines_.push_back({nullptr, 0, 0});

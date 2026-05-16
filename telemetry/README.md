@@ -19,7 +19,7 @@ A third route, `GET /healthz`, is just an uptime probe.
 
 **Not stored:** IP address, hostname, username, MAC, screen contents, anything from the mirrored phone.
 
-App Insights retention is set to **90 days** and the workspace is capped at **1 GB/day** so a stuck client cannot generate a surprise bill.
+App Insights retention is set to **730 days interactive + 4383 days archive (~12 years total)** — the platform maximum; Azure does not offer true unlimited retention. The workspace is capped at **1 GB/day** so a stuck client cannot generate a surprise bill.
 
 ## Architecture
 

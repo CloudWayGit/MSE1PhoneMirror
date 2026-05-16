@@ -19,9 +19,24 @@ resource law 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   tags: tags
   properties: {
     sku: { name: 'PerGB2018' }
-    retentionInDays: 90
+    // Max interactive retention (730 days). For longer lifetimes the workspace
+    // alone cannot do it — see the per-table archive policy below which extends
+    // total retention to 4383 days (~12 years), the Azure platform maximum.
+    retentionInDays: 730
     features: { enableLogAccessUsingOnlyResourcePermissions: true }
     workspaceCapping: { dailyQuotaGb: 1 }
+  }
+}
+
+// Per-table retention override for AppEvents (where customEvents land).
+// 730 days hot/interactive + archive out to 4383 days (12 years, Azure max).
+// Azure does not support truly unlimited retention; this is the longest allowed.
+resource appEventsTable 'Microsoft.OperationalInsights/workspaces/tables@2023-09-01' = {
+  parent: law
+  name: 'AppEvents'
+  properties: {
+    retentionInDays: 730
+    totalRetentionInDays: 4383
   }
 }
 
@@ -34,6 +49,7 @@ resource appi 'Microsoft.Insights/components@2020-02-02' = {
     Application_Type: 'web'
     WorkspaceResourceId: law.id
     IngestionMode: 'LogAnalytics'
+    RetentionInDays: 730
     publicNetworkAccessForIngestion: 'Enabled'
     publicNetworkAccessForQuery: 'Enabled'
   }

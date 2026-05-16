@@ -19,8 +19,10 @@ var tags = {
   project: '1PhoneMirror-Telemetry'
 }
 
+// RG name pattern: '{environmentName}-rg' so that environmentName='1phonemirror-prod'
+// produces the exact group name '1phonemirror-prod-rg'.
 resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
-  name: '${abbrs.resourcesResourceGroups}${environmentName}'
+  name: '${environmentName}-rg'
   location: location
   tags: tags
 }

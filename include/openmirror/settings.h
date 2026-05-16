@@ -34,7 +34,7 @@ struct Settings {
     // {install_id, version, os_build} payload to the telemetry endpoint on
     // each launch. No IP, hostname, username, MAC, or screen contents are
     // sent. Defaults to false; user enables it from the Settings panel.
-    bool telemetry_enabled = false;
+    bool telemetry_enabled = true;
 
     // Returns the path to the settings file (creates the directory if needed).
     static std::string file_path();

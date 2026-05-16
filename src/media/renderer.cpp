@@ -4639,9 +4639,25 @@ void Renderer::draw_settings_panel() {
         settings_.use_computer_name, cy);
     cy += label_h + row_gap;
     settings_toggle_telemetry_btn_ = draw_toggle(
-        "Send anonymous launch ping (helps the project)",
+        "Send anonymous usage ping (recommended)",
         settings_.telemetry_enabled, cy);
-    cy += label_h + row_gap;
+    cy += label_h + 2;
+    // Subtitle: explain what is collected and why. Always-visible (no hover
+    // tooltips in SDL); rendered dim/smaller so it doesn't crowd the row.
+    {
+        int sub_h    = std::max(10, label_h * 4 / 5);
+        int sub_box  = std::max(12, label_h + 2);
+        int sub_x    = panel_x + pad + sub_box + std::max(6, sub_box / 3);
+        const char* sub_lines[] = {
+            "Sends a random install ID, app version and Windows build at startup.",
+            "No IP, no name, no content. Helps me prioritize fixes and platforms."
+        };
+        for (const char* sl : sub_lines) {
+            draw_label(sl, sub_h, sub_x, cy, 150, 150, 155, false);
+            cy += sub_h + 1;
+        }
+    }
+    cy += row_gap;
     settings_toggle_log_btn_ = draw_toggle(
         "Save log file to screenshots folder (this session)",
         log_to_file_session_, cy);

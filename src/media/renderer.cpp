@@ -4650,7 +4650,7 @@ void Renderer::draw_settings_panel() {
         int sub_x    = panel_x + pad + sub_box + std::max(6, sub_box / 3);
         const char* sub_lines[] = {
             "Sends a random install ID, app version and Windows build at startup.",
-            "No IP, no name, no content. Helps me prioritize fixes and platforms."
+            "No IP, no name, no content. Inspires me to prioritize fixes and platforms."
         };
         for (const char* sl : sub_lines) {
             draw_label(sl, sub_h, sub_x, cy, 150, 150, 155, false);

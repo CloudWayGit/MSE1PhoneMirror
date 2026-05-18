@@ -401,6 +401,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
     // frame texture and the waiting screen would never render.
     settings_ = openmirror::Settings::load();
     phone_frame_.set_bezel_color(settings_.bezel_r, settings_.bezel_g, settings_.bezel_b);
+    SDL_SetWindowAlwaysOnTop(window_, settings_.always_on_top ? SDL_TRUE : SDL_FALSE);
 
     phone_frame_.generate(sdl_renderer_, 390, 844);
 
@@ -514,9 +515,9 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
                                      "https://buymeacoffee.com/simonskothn",
                                      "Buy me a coffee",
                                      L"Segoe UI Symbol"));
-        // Line 3: " · v0.3.9" — broken onto its own line so the second
+        // Line 3: " · v0.4.0" — broken onto its own line so the second
         // line stays a comfortable width on narrow phone aspects.
-        footer_line3_.push_back(seg(L"v0.3.9", 100, 100, 100,
+        footer_line3_.push_back(seg(L"v0.4.0", 100, 100, 100,
                                      "", "Version history (V)"));
 
         // Mirror the same content for the Info panel, but baked at the
@@ -546,7 +547,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
                                            "https://buymeacoffee.com/simonskothn",
                                            "Buy me a coffee",
                                            L"Segoe UI Symbol"));
-        info_footer_line3_.push_back(iseg(L"v0.3.9", 130, 130, 130,
+        info_footer_line3_.push_back(iseg(L"v0.4.0", 130, 130, 130,
                                            "", "Version history (V)"));
     }
 #endif
@@ -560,7 +561,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
             line.tex = make_text_texture_w(sdl_renderer_, text, font_sz, r, g, b, &line.w, &line.h);
             return line;
         };
-        info_lines_.push_back(make_info(L"1PhoneMirror v0.3.9", 44, 255, 255, 255));
+        info_lines_.push_back(make_info(L"1PhoneMirror v0.4.0", 44, 255, 255, 255));
         info_lines_.push_back(make_info(L"AirPlay (iOS) \u00B7 scrcpy (Android)", 34, 160, 160, 160));
         info_lines_.push_back({nullptr, 0, 0}); // spacer
         info_lines_.push_back(make_info(L"(F) Fullscreen \u00B7 (M) Menu \u00B7 (L) Log \u00B7 (A) Add Android", 30, 130, 130, 130));
@@ -570,6 +571,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         info_lines_.push_back(make_info(L"(Ctrl+Shift+T) OCR copy text from a region", 30, 130, 130, 130));
 #endif
         info_lines_.push_back(make_info(L"(Ctrl+R) Record \u00B7 (Ctrl+0) Reset window size", 30, 130, 130, 130));
+        info_lines_.push_back(make_info(L"(Ctrl+1\u20139) Switch to device 1\u20139 in the bottom-bezel picker", 30, 130, 130, 130));
         info_lines_.push_back(make_info(L"In log: (Ctrl+C) Copy \u00B7 (Ctrl+X) Clear", 30, 130, 130, 130));
         info_lines_.push_back({nullptr, 0, 0}); // spacer
         info_lines_.push_back(make_info(L"Network requirements", 34, 160, 160, 160));
@@ -596,6 +598,9 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         };
         version_lines_.push_back(make_ver(L"Version History", 40, 255, 255, 255));
         version_lines_.push_back({nullptr, 0, 0}); // spacer
+        version_lines_.push_back(make_ver(L"18.05.2026 \u2013 0.4.0", 34, 200, 200, 255));
+        version_lines_.push_back(make_ver(L"Multi-device shortcuts (Ctrl+1\u20139), always-on-top, Apple naming", 30, 160, 160, 160));
+        version_lines_.push_back({nullptr, 0, 0});
         version_lines_.push_back(make_ver(L"17.05.2026 \u2013 0.3.9", 34, 200, 200, 255));
         version_lines_.push_back(make_ver(L"Small telemetry in settings", 30, 160, 160, 160));
         version_lines_.push_back({nullptr, 0, 0});
@@ -968,6 +973,36 @@ void Renderer::run() {
                     reset_window_to_default_size();
                     btn_flash_ = true;
                     btn_flash_start_ = std::chrono::steady_clock::now();
+                }
+                // Ctrl+1..Ctrl+9 — switch active source by picker order.
+                // Same Alt/Shift guard as Ctrl+0 to avoid AltGr collisions.
+                if ((event.key.keysym.mod & KMOD_CTRL) &&
+                    !(event.key.keysym.mod & KMOD_ALT) &&
+                    !(event.key.keysym.mod & KMOD_SHIFT)) {
+                    int picked = -1;
+                    SDL_Keycode k = event.key.keysym.sym;
+                    if      (k == SDLK_1 || k == SDLK_KP_1) picked = 0;
+                    else if (k == SDLK_2 || k == SDLK_KP_2) picked = 1;
+                    else if (k == SDLK_3 || k == SDLK_KP_3) picked = 2;
+                    else if (k == SDLK_4 || k == SDLK_KP_4) picked = 3;
+                    else if (k == SDLK_5 || k == SDLK_KP_5) picked = 4;
+                    else if (k == SDLK_6 || k == SDLK_KP_6) picked = 5;
+                    else if (k == SDLK_7 || k == SDLK_KP_7) picked = 6;
+                    else if (k == SDLK_8 || k == SDLK_KP_8) picked = 7;
+                    else if (k == SDLK_9 || k == SDLK_KP_9) picked = 8;
+                    if (picked >= 0 && get_sources_fn_ && set_active_source_fn_) {
+                        auto sources = get_sources_fn_();
+                        if (picked < (int)sources.size()) {
+                            const auto& sel = sources[picked];
+                            if (!sel.active) {
+                                pending_source_name_ = sel.name;
+                                source_just_switched_ = true;
+                            }
+                            set_active_source_fn_(sel.id);
+                            btn_flash_ = true;
+                            btn_flash_start_ = std::chrono::steady_clock::now();
+                        }
+                    }
                 }
 #ifdef _WIN32
                 // Ctrl+Shift+T: OCR copy. Open the region picker over the
@@ -1585,6 +1620,12 @@ void Renderer::run() {
                             if (in_rect(mx, my, settings_toggle_compname_btn_.x, settings_toggle_compname_btn_.y,
                                         settings_toggle_compname_btn_.w, settings_toggle_compname_btn_.h)) {
                                 settings_.use_computer_name = !settings_.use_computer_name;
+                                settings_.save();
+                            }
+                            if (in_rect(mx, my, settings_toggle_aot_btn_.x, settings_toggle_aot_btn_.y,
+                                        settings_toggle_aot_btn_.w, settings_toggle_aot_btn_.h)) {
+                                settings_.always_on_top = !settings_.always_on_top;
+                                SDL_SetWindowAlwaysOnTop(window_, settings_.always_on_top ? SDL_TRUE : SDL_FALSE);
                                 settings_.save();
                             }
                             if (in_rect(mx, my, settings_toggle_telemetry_btn_.x, settings_toggle_telemetry_btn_.y,
@@ -2866,7 +2907,9 @@ void Renderer::render_frame() {
                     std::string state = sources[i].paused ? " (paused)"
                                        : sources[i].streaming ? " (live)"
                                        : "";
-                    bezel_hover_text = sources[i].name + state +
+                    std::string shortcut;
+                    if (i < 9) shortcut = "  (Ctrl+" + std::to_string((int)i + 1) + ")";
+                    bezel_hover_text = sources[i].name + shortcut + state +
                                        "\nLeft-click: switch  \u00B7  Right-click: menu";
                     bezel_hover_ax = cx;
                     bezel_hover_ay = cy - dot_r - 4;
@@ -4520,9 +4563,10 @@ void Renderer::draw_settings_panel() {
                 + row_gap + label_h + row_gap            // toggle 1 (save)
                 + label_h + row_gap                       // toggle 2 (clipboard)
                 + label_h + row_gap                       // toggle 3 (computer name)
-                + (label_h + 2)                           // toggle 4 (telemetry)
+                + label_h + row_gap                       // toggle 4 (always on top)
+                + (label_h + 2)                           // toggle 5 (telemetry)
                 + 3 * (telemetry_sub_h + 1) + row_gap     // telemetry subtitle (3 lines)
-                + label_h + row_gap                       // toggle 5 (file log)
+                + label_h + row_gap                       // toggle 6 (file log)
                 + label_h + row_gap                       // recording format row
                 + pad;
 
@@ -4643,6 +4687,10 @@ void Renderer::draw_settings_panel() {
     settings_toggle_compname_btn_ = draw_toggle(
         "Identify as computer name (restart required)",
         settings_.use_computer_name, cy);
+    cy += label_h + row_gap;
+    settings_toggle_aot_btn_ = draw_toggle(
+        "Always keep window on top",
+        settings_.always_on_top, cy);
     cy += label_h + row_gap;
     settings_toggle_telemetry_btn_ = draw_toggle(
         "Send anonymous usage ping (recommended)",

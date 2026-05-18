@@ -36,7 +36,7 @@ AirPlayServer::get_or_create_source_locked(const std::string& ip) {
     auto src = std::make_unique<MirrorSource>();
     src->id = ip;
     src->number = next_source_number_++;
-    src->name = "Device " + std::to_string(src->number);
+    src->name = "Apple " + std::to_string(src->number);
     src->buffer = std::make_unique<MirrorBuffer>();
     src->video_decoder = std::make_unique<media::Decoder>();
     if (!src->video_decoder->init_video(AV_CODEC_ID_H264)) {

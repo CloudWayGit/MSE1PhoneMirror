@@ -30,6 +30,10 @@ struct Settings {
     // on the same network. Applied at next launch.
     bool use_computer_name = false;
 
+    // Keep the app window above all other windows (no-focus topmost).
+    // Applied immediately when toggled and again at startup.
+    bool always_on_top = false;
+
     // Opt-in anonymous launch ping. When true, the app POSTs a one-shot
     // {install_id, version, os_build} payload to the telemetry endpoint on
     // each launch. No IP, hostname, username, MAC, or screen contents are

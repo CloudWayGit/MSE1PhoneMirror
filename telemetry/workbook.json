@@ -4,7 +4,7 @@
     {
       "type": 1,
       "content": {
-        "json": "# 1PhoneMirror — Usage\n\nDownloads via the `/dl` redirector, plus opt-in launch pings from the desktop app. All data is anonymous (no IP, no hostname).\n\nTime range applies to every chart below."
+        "json": "# 1PhoneMirror — Usage\n\nLaunches (opt-in /ping) and downloads (/dl redirector). All data anonymous.\nUse the time range below — it applies to every chart."
       },
       "name": "title"
     },
@@ -25,111 +25,198 @@
                 { "durationMs": 86400000 },
                 { "durationMs": 604800000 },
                 { "durationMs": 2592000000 },
-                { "durationMs": 7776000000 }
+                { "durationMs": 7776000000 },
+                { "durationMs": 31536000000 }
               ]
             }
+          },
+          {
+            "id": "bin",
+            "version": "KqlParameterItem/1.0",
+            "name": "Bin",
+            "type": 2,
+            "isRequired": true,
+            "value": "1h",
+            "jsonData": "[{\"value\":\"5m\",\"label\":\"5 minutes\"},{\"value\":\"1h\",\"label\":\"1 hour\",\"selected\":true},{\"value\":\"1d\",\"label\":\"1 day\"}]"
           }
         ]
       },
       "name": "params"
     },
     {
-      "type": 3,
-      "content": {
-        "version": "KqlItem/1.0",
-        "query": "customEvents\n| where name == 'Download'\n| summarize Downloads = count() by Version = tostring(customDimensions.version)\n| order by Version desc",
-        "size": 1,
-        "title": "Downloads by version",
-        "timeContext": { "durationMs": 0 },
-        "timeContextFromParameter": "TimeRange",
-        "visualization": "barchart"
-      },
-      "name": "dl-by-version"
+      "type": 1,
+      "content": { "json": "## At a glance" },
+      "name": "h-tiles"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "customEvents\n| where name == 'Download'\n| summarize Downloads = count() by Client = tostring(customDimensions.client)\n| order by Downloads desc",
-        "size": 1,
-        "title": "Downloads by client (winget vs browser)",
-        "timeContext": { "durationMs": 0 },
+        "query": "customEvents | where name == 'Launch' | summarize Launches = count(), Installs = dcount(tostring(customDimensions.install_id)), Versions = dcount(tostring(customDimensions.version))",
+        "size": 4,
+        "title": "Launches · distinct installs · versions seen",
         "timeContextFromParameter": "TimeRange",
-        "visualization": "piechart"
+        "visualization": "tiles"
       },
-      "name": "dl-by-client"
+      "name": "tiles-launch"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "customEvents\n| where name == 'Download'\n| summarize Downloads = count() by bin(timestamp, 1d), Client = tostring(customDimensions.client)\n| render timechart",
-        "size": 1,
-        "title": "Downloads over time",
-        "timeContext": { "durationMs": 0 },
+        "query": "customEvents | where name == 'Download' | summarize Downloads = count(), Versions = dcount(tostring(customDimensions.version)), Files = dcount(tostring(customDimensions.file))",
+        "size": 4,
+        "title": "Downloads via /dl redirector",
         "timeContextFromParameter": "TimeRange",
-        "visualization": "timechart"
+        "visualization": "tiles"
       },
-      "name": "dl-timeseries"
-    },
-    {
-      "type": 3,
-      "content": {
-        "version": "KqlItem/1.0",
-        "query": "customEvents\n| where name == 'Download'\n| summarize Downloads = count() by Country = tostring(customDimensions.country)\n| order by Downloads desc\n| take 25",
-        "size": 1,
-        "title": "Downloads by country (top 25)",
-        "timeContext": { "durationMs": 0 },
-        "timeContextFromParameter": "TimeRange",
-        "visualization": "table"
-      },
-      "name": "dl-by-country"
+      "name": "tiles-dl"
     },
     {
       "type": 1,
-      "content": { "json": "## Launch pings (opt-in)" },
-      "name": "h-launch"
+      "content": { "json": "## App launches over time\nTotal `Launch` events per bucket. Each desktop install pings once per process startup (when the user has the opt-in toggle on). Adjust the **Bin** parameter for granularity." },
+      "name": "h-launches"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "customEvents\n| where name == 'Launch'\n| summarize ActiveInstalls = dcount(tostring(customDimensions.install_id)) by bin(timestamp, 1d)\n| render timechart",
-        "size": 1,
-        "title": "Daily active installs (distinct install_id)",
-        "timeContext": { "durationMs": 0 },
+        "query": "customEvents | where name == 'Launch' | summarize Launches = count() by bin(timestamp, totimespan('{Bin}')) | render columnchart",
+        "size": 0,
+        "title": "App starts per bin",
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "columnchart"
+      },
+      "name": "launch-total"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents | where name == 'Launch' | summarize Launches = count(), Installs = dcount(tostring(customDimensions.install_id)) by bin(timestamp, totimespan('{Bin}')) | render timechart",
+        "size": 0,
+        "title": "Launches vs. distinct installs over time",
         "timeContextFromParameter": "TimeRange",
         "visualization": "timechart"
       },
-      "name": "active-installs"
+      "name": "launch-vs-installs"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "customEvents\n| where name == 'Launch'\n| summarize Installs = dcount(tostring(customDimensions.install_id)) by Version = tostring(customDimensions.version)\n| order by Version desc",
+        "query": "customEvents | where name == 'Launch' | extend hod = hourofday(timestamp), dow = case(dayofweek(timestamp)==0d,'Sun',dayofweek(timestamp)==1d,'Mon',dayofweek(timestamp)==2d,'Tue',dayofweek(timestamp)==3d,'Wed',dayofweek(timestamp)==4d,'Thu',dayofweek(timestamp)==5d,'Fri','Sat') | summarize Launches = count() by dow, hod | order by hod asc",
         "size": 1,
-        "title": "Active installs by app version",
-        "timeContext": { "durationMs": 0 },
+        "title": "When users launch the app (hour-of-day x day-of-week)",
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            { "columnMatch": "Launches", "formatter": 4, "formatOptions": { "palette": "blue" } }
+          ]
+        }
+      },
+      "name": "launch-heatmap"
+    },
+    {
+      "type": 1,
+      "content": { "json": "## Versions and platforms" },
+      "name": "h-versions"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents | where name == 'Launch' | summarize Launches = count(), Installs = dcount(tostring(customDimensions.install_id)) by Version = tostring(customDimensions.version) | order by Version desc",
+        "size": 1,
+        "title": "Launches by app version",
         "timeContextFromParameter": "TimeRange",
         "visualization": "barchart"
       },
-      "name": "installs-by-version"
+      "name": "launch-by-version"
     },
     {
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "customEvents\n| where name == 'Launch'\n| summarize Installs = dcount(tostring(customDimensions.install_id)) by OsBuild = tostring(customDimensions.os_build)\n| order by Installs desc\n| take 20",
+        "query": "customEvents | where name == 'Launch' | summarize Installs = dcount(tostring(customDimensions.install_id)) by Version = tostring(customDimensions.version), bin(timestamp, totimespan('{Bin}')) | render timechart",
         "size": 1,
-        "title": "Active installs by Windows build",
-        "timeContext": { "durationMs": 0 },
+        "title": "Version adoption over time (distinct installs)",
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "timechart"
+      },
+      "name": "version-adoption"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents | where name == 'Launch' | summarize Installs = dcount(tostring(customDimensions.install_id)), Launches = count() by OsBuild = tostring(customDimensions.os_build) | order by Installs desc | take 20",
+        "size": 1,
+        "title": "Windows build distribution (top 20)",
         "timeContextFromParameter": "TimeRange",
         "visualization": "table"
       },
-      "name": "installs-by-os"
+      "name": "by-os"
+    },
+    {
+      "type": 1,
+      "content": { "json": "## Downloads (/dl redirector)\nCounts every redirect served by the Azure Function — winget, browser, curl, PowerShell, etc." },
+      "name": "h-downloads"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents | where name == 'Download' | summarize Downloads = count() by bin(timestamp, totimespan('{Bin}')), Client = tostring(customDimensions.client) | render columnchart with (kind=stacked)",
+        "size": 0,
+        "title": "Downloads over time (stacked by client)",
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "columnchart"
+      },
+      "name": "dl-time"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents | where name == 'Download' | summarize Downloads = count() by Client = tostring(customDimensions.client) | order by Downloads desc",
+        "size": 1,
+        "title": "Downloads by client",
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "piechart"
+      },
+      "name": "dl-client"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents | where name == 'Download' | summarize Downloads = count() by Version = tostring(customDimensions.version) | order by Version desc",
+        "size": 1,
+        "title": "Downloads by version",
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "barchart"
+      },
+      "name": "dl-version"
+    },
+    {
+      "type": 1,
+      "content": { "json": "## Raw activity (latest 100)" },
+      "name": "h-raw"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customEvents | where name in ('Launch','Download') | project timestamp, name, version=tostring(customDimensions.version), install_id=tostring(customDimensions.install_id), os_build=tostring(customDimensions.os_build), client=tostring(customDimensions.client), file=tostring(customDimensions.file) | order by timestamp desc | take 100",
+        "size": 1,
+        "title": "Latest events",
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "table"
+      },
+      "name": "raw"
     }
   ],
-  "styleSettings": {},
   "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
 }

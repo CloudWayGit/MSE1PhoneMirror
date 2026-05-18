@@ -36,6 +36,79 @@ extern "C" {
     void stbi_image_free(void* retval_from_stbi_load);
 }
 
+#ifdef _WIN32
+// Locate TechSmith Snagit Editor on this machine. Checks the published
+// App Paths registry key first (works for any installed major version),
+// then falls back to scanning Program Files for "Snagit <ver>" folders.
+// Returns an empty string if Snagit is not installed.
+static std::string find_snagit_editor() {
+    const HKEY roots[]  = { HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER };
+    const REGSAM views[] = { KEY_WOW64_64KEY, KEY_WOW64_32KEY };
+    for (HKEY root : roots) {
+        for (REGSAM view : views) {
+            HKEY hk = nullptr;
+            if (RegOpenKeyExA(root,
+                    "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\SnagitEditor.exe",
+                    0, KEY_READ | view, &hk) == ERROR_SUCCESS) {
+                char buf[MAX_PATH] = {0};
+                DWORD cb = sizeof(buf);
+                DWORD type = 0;
+                LONG r = RegQueryValueExA(hk, nullptr, nullptr, &type,
+                                          (LPBYTE)buf, &cb);
+                RegCloseKey(hk);
+                if (r == ERROR_SUCCESS && cb > 0) {
+                    std::string path(buf);
+                    if (!path.empty() && std::filesystem::exists(path)) return path;
+                }
+            }
+        }
+    }
+    const char* env_keys[] = { "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432" };
+    for (const char* k : env_keys) {
+        char buf[MAX_PATH];
+        DWORD n = GetEnvironmentVariableA(k, buf, sizeof(buf));
+        if (n == 0 || n >= sizeof(buf)) continue;
+        std::filesystem::path techsmith = std::filesystem::path(buf) / "TechSmith";
+        std::error_code ec;
+        if (!std::filesystem::is_directory(techsmith, ec)) continue;
+        for (auto& entry : std::filesystem::directory_iterator(techsmith, ec)) {
+            if (!entry.is_directory()) continue;
+            auto name = entry.path().filename().string();
+            if (name.rfind("Snagit", 0) != 0) continue;
+            auto candidate = entry.path() / "SnagitEditor.exe";
+            if (std::filesystem::exists(candidate, ec)) {
+                return candidate.string();
+            }
+        }
+    }
+    return {};
+}
+
+// Open `file_path` in Snagit Editor. Returns true if Snagit was found
+// and launched. ShellExecute with the explicit editor path is the most
+// reliable invocation (the editor accepts a single file argument).
+static bool open_in_snagit(const std::string& file_path) {
+    std::string editor = find_snagit_editor();
+    if (editor.empty()) {
+        std::cout << "[Snagit] SnagitEditor.exe not found on this machine\n";
+        return false;
+    }
+    std::string params = "\"" + file_path + "\"";
+    HINSTANCE r = ShellExecuteA(nullptr, "open", editor.c_str(),
+                                params.c_str(), nullptr, SW_SHOWNORMAL);
+    if ((INT_PTR)r <= 32) {
+        std::cout << "[Snagit] ShellExecute failed (code "
+                  << (INT_PTR)r << ") for " << editor << "\n";
+        return false;
+    }
+    std::cout << "[Snagit] Opened " << file_path << " in " << editor << "\n";
+    return true;
+}
+#else
+static inline std::string find_snagit_editor() { return {}; }
+static inline bool open_in_snagit(const std::string&) { return false; }
+#endif
+
 // ---------------------------------------------------------------------------
 // GDI text helpers → SDL_Texture  (Segoe UI, anti-aliased)
 // ---------------------------------------------------------------------------
@@ -517,7 +590,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
                                      L"Segoe UI Symbol"));
         // Line 3: " · v0.4.0" — broken onto its own line so the second
         // line stays a comfortable width on narrow phone aspects.
-        footer_line3_.push_back(seg(L"v0.4.0", 100, 100, 100,
+        footer_line3_.push_back(seg(L"v0.4.1", 100, 100, 100,
                                      "", "Version history (V)"));
 
         // Mirror the same content for the Info panel, but baked at the
@@ -547,7 +620,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
                                            "https://buymeacoffee.com/simonskothn",
                                            "Buy me a coffee",
                                            L"Segoe UI Symbol"));
-        info_footer_line3_.push_back(iseg(L"v0.4.0", 130, 130, 130,
+        info_footer_line3_.push_back(iseg(L"v0.4.1", 130, 130, 130,
                                            "", "Version history (V)"));
     }
 #endif
@@ -561,7 +634,7 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
             line.tex = make_text_texture_w(sdl_renderer_, text, font_sz, r, g, b, &line.w, &line.h);
             return line;
         };
-        info_lines_.push_back(make_info(L"1PhoneMirror v0.4.0", 44, 255, 255, 255));
+        info_lines_.push_back(make_info(L"1PhoneMirror v0.4.1", 44, 255, 255, 255));
         info_lines_.push_back(make_info(L"AirPlay (iOS) \u00B7 scrcpy (Android)", 34, 160, 160, 160));
         info_lines_.push_back({nullptr, 0, 0}); // spacer
         info_lines_.push_back(make_info(L"(F) Fullscreen \u00B7 (M) Menu \u00B7 (L) Log \u00B7 (A) Add Android", 30, 130, 130, 130));
@@ -598,6 +671,9 @@ bool Renderer::init(const std::string& title, int /*width*/, int /*height*/) {
         };
         version_lines_.push_back(make_ver(L"Version History", 40, 255, 255, 255));
         version_lines_.push_back({nullptr, 0, 0}); // spacer
+        version_lines_.push_back(make_ver(L"18.05.2026 \u2013 0.4.1", 34, 200, 200, 255));
+        version_lines_.push_back(make_ver(L"Open screenshots directly in Snagit Editor (new Settings toggle)", 30, 160, 160, 160));
+        version_lines_.push_back({nullptr, 0, 0});
         version_lines_.push_back(make_ver(L"18.05.2026 \u2013 0.4.0", 34, 200, 200, 255));
         version_lines_.push_back(make_ver(L"Multi-device shortcuts (Ctrl+1\u20139), always-on-top, Apple naming", 30, 160, 160, 160));
         version_lines_.push_back({nullptr, 0, 0});
@@ -1615,6 +1691,19 @@ void Renderer::run() {
                             if (in_rect(mx, my, settings_toggle_clip_btn_.x, settings_toggle_clip_btn_.y,
                                         settings_toggle_clip_btn_.w, settings_toggle_clip_btn_.h)) {
                                 settings_.screenshot_copy_to_clipboard = !settings_.screenshot_copy_to_clipboard;
+                                settings_.save();
+                            }
+                            if (in_rect(mx, my, settings_toggle_snagit_btn_.x, settings_toggle_snagit_btn_.y,
+                                        settings_toggle_snagit_btn_.w, settings_toggle_snagit_btn_.h)) {
+                                settings_.screenshot_open_in_snagit = !settings_.screenshot_open_in_snagit;
+                                // If user just enabled it, warn (in toast) when
+                                // Snagit isn't installed so they're not
+                                // surprised by silent no-ops later.
+                                if (settings_.screenshot_open_in_snagit && find_snagit_editor().empty()) {
+                                    toast_text_ = "Snagit Editor not found on this PC";
+                                    toast_active_ = true;
+                                    toast_start_ = std::chrono::steady_clock::now();
+                                }
                                 settings_.save();
                             }
                             if (in_rect(mx, my, settings_toggle_compname_btn_.x, settings_toggle_compname_btn_.y,
@@ -4562,11 +4651,12 @@ void Renderer::draw_settings_panel() {
                 + swatch_rows * (swatch + row_gap)
                 + row_gap + label_h + row_gap            // toggle 1 (save)
                 + label_h + row_gap                       // toggle 2 (clipboard)
-                + label_h + row_gap                       // toggle 3 (computer name)
-                + label_h + row_gap                       // toggle 4 (always on top)
-                + (label_h + 2)                           // toggle 5 (telemetry)
+                + label_h + row_gap                       // toggle 3 (Snagit)
+                + label_h + row_gap                       // toggle 4 (computer name)
+                + label_h + row_gap                       // toggle 5 (always on top)
+                + (label_h + 2)                           // toggle 6 (telemetry)
                 + 3 * (telemetry_sub_h + 1) + row_gap     // telemetry subtitle (3 lines)
-                + label_h + row_gap                       // toggle 6 (file log)
+                + label_h + row_gap                       // toggle 7 (file log)
                 + label_h + row_gap                       // recording format row
                 + pad;
 
@@ -4683,6 +4773,10 @@ void Renderer::draw_settings_panel() {
     settings_toggle_clip_btn_ = draw_toggle(
         "Copy screenshots to clipboard",
         settings_.screenshot_copy_to_clipboard, cy);
+    cy += label_h + row_gap;
+    settings_toggle_snagit_btn_ = draw_toggle(
+        "Open screenshots in Snagit Editor",
+        settings_.screenshot_open_in_snagit, cy);
     cy += label_h + row_gap;
     settings_toggle_compname_btn_ = draw_toggle(
         "Identify as computer name (restart required)",
@@ -5963,8 +6057,9 @@ void Renderer::take_screenshot() {
 
     const bool save = settings_.screenshot_save_to_folder;
     const bool clip = settings_.screenshot_copy_to_clipboard;
-    if (!save && !clip) {
-        std::cout << "[Screenshot] Both save-to-folder and clipboard are disabled in settings\n";
+    const bool snag = settings_.screenshot_open_in_snagit;
+    if (!save && !clip && !snag) {
+        std::cout << "[Screenshot] All output options are disabled in settings\n";
         toast_text_ = "Screenshot disabled in Settings";
         toast_active_ = true;
         toast_start_ = std::chrono::steady_clock::now();
@@ -5983,7 +6078,16 @@ void Renderer::take_screenshot() {
 #endif
     char timestamp[32];
     strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", &local_tm);
+    // Primary filename in the user's screenshots folder. If "save" is off
+    // but Snagit is on we write a transient copy into %TEMP% so Snagit
+    // has something to open.
     std::string filename = screenshot_dir_ + "/screenshot_" + timestamp + ".png";
+    std::string snagit_path; // path passed to Snagit when save==false
+    if (!save && snag) {
+        std::error_code ec;
+        auto tmp = std::filesystem::temp_directory_path(ec);
+        if (!ec) snagit_path = (tmp / ("1PhoneMirror_" + std::string(timestamp) + ".png")).string();
+    }
 
     bool saved = false;
     if (phone_frame_enabled_ && phone_frame_.is_generated()) {
@@ -5996,12 +6100,15 @@ void Renderer::take_screenshot() {
             bool wrote = true;
             if (save) {
                 wrote = stbi_write_png(filename.c_str(), out_w, out_h, 4, composite, out_w * 4) != 0;
+            } else if (snag && !snagit_path.empty()) {
+                wrote = stbi_write_png(snagit_path.c_str(), out_w, out_h, 4, composite, out_w * 4) != 0;
             }
             if (wrote) {
                 saved = true;
                 if (clip) copy_to_clipboard(composite, out_w, out_h);
+                if (snag) open_in_snagit(save ? filename : snagit_path);
                 if (save) std::cout << "[Screenshot] Saved: " << filename << " (" << out_w << "x" << out_h << ")\n";
-                else      std::cout << "[Screenshot] Copied to clipboard (" << out_w << "x" << out_h << ")\n";
+                else if (clip) std::cout << "[Screenshot] Copied to clipboard (" << out_w << "x" << out_h << ")\n";
             }
             delete[] composite;
         }
@@ -6010,19 +6117,26 @@ void Renderer::take_screenshot() {
         if (save) {
             wrote = stbi_write_png(filename.c_str(), last_frame_w_, last_frame_h_, 4,
                                    last_frame_data_.data(), last_frame_stride_) != 0;
+        } else if (snag && !snagit_path.empty()) {
+            wrote = stbi_write_png(snagit_path.c_str(), last_frame_w_, last_frame_h_, 4,
+                                   last_frame_data_.data(), last_frame_stride_) != 0;
         }
         if (wrote) {
             saved = true;
             if (clip) copy_to_clipboard(last_frame_data_.data(), last_frame_w_, last_frame_h_);
+            if (snag) open_in_snagit(save ? filename : snagit_path);
             if (save) std::cout << "[Screenshot] Saved: " << filename << "\n";
-            else      std::cout << "[Screenshot] Copied to clipboard\n";
+            else if (clip) std::cout << "[Screenshot] Copied to clipboard\n";
         }
     }
 
     if (saved) {
-        if      (save && clip) toast_text_ = "Saved to Pictures & copied to clipboard";
-        else if (save)         toast_text_ = "Saved to Pictures";
-        else                   toast_text_ = "Copied to clipboard";
+        std::string parts;
+        auto add = [&](const char* p){ if (!parts.empty()) parts += " + "; parts += p; };
+        if (save) add("saved to Pictures");
+        if (clip) add("copied to clipboard");
+        if (snag) add("opened in Snagit");
+        toast_text_ = "Screenshot: " + parts;
         toast_active_ = true;
         toast_start_ = std::chrono::steady_clock::now();
     }
@@ -6532,7 +6646,8 @@ void Renderer::save_annotated() {
 
     const bool save = settings_.screenshot_save_to_folder;
     const bool clip = settings_.screenshot_copy_to_clipboard;
-    if (!save && !clip) {
+    const bool snag = settings_.screenshot_open_in_snagit;
+    if (!save && !clip && !snag) {
         toast_text_ = "Screenshot disabled in Settings";
         toast_active_ = true;
         toast_start_ = std::chrono::steady_clock::now();
@@ -6546,29 +6661,44 @@ void Renderer::save_annotated() {
 
     bool wrote = true;
     std::string filename;
+    std::string snagit_path;
+    auto now = std::chrono::system_clock::now();
+    auto tt = std::chrono::system_clock::to_time_t(now);
+    struct tm local_tm;
+#ifdef _WIN32
+    localtime_s(&local_tm, &tt);
+#else
+    localtime_r(&tt, &local_tm);
+#endif
+    char timestamp[32];
+    strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", &local_tm);
     if (save) {
         std::filesystem::create_directories(screenshot_dir_);
-        auto now = std::chrono::system_clock::now();
-        auto tt = std::chrono::system_clock::to_time_t(now);
-        struct tm local_tm;
-#ifdef _WIN32
-        localtime_s(&local_tm, &tt);
-#else
-        localtime_r(&tt, &local_tm);
-#endif
-        char timestamp[32];
-        strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", &local_tm);
         filename = screenshot_dir_ + "/annotated_" + timestamp + ".png";
         wrote = stbi_write_png(filename.c_str(), annotator_bg_w_, annotator_bg_h_,
                                4, baked.data(), annotator_bg_w_ * 4) != 0;
+    } else if (snag) {
+        std::error_code ec;
+        auto tmp = std::filesystem::temp_directory_path(ec);
+        if (!ec) {
+            snagit_path = (tmp / ("1PhoneMirror_annot_" + std::string(timestamp) + ".png")).string();
+            wrote = stbi_write_png(snagit_path.c_str(), annotator_bg_w_, annotator_bg_h_,
+                                   4, baked.data(), annotator_bg_w_ * 4) != 0;
+        }
     }
     if (wrote && clip) {
         copy_to_clipboard(baked.data(), annotator_bg_w_, annotator_bg_h_);
     }
+    if (wrote && snag) {
+        open_in_snagit(save ? filename : snagit_path);
+    }
     if (wrote) {
-        if      (save && clip) toast_text_ = "Annotated: saved & copied";
-        else if (save)         toast_text_ = "Annotated: saved to Pictures";
-        else                   toast_text_ = "Annotated: copied to clipboard";
+        std::string parts;
+        auto add = [&](const char* p){ if (!parts.empty()) parts += " + "; parts += p; };
+        if (save) add("saved");
+        if (clip) add("copied");
+        if (snag) add("Snagit");
+        toast_text_ = "Annotated: " + parts;
         toast_active_ = true;
         toast_start_ = std::chrono::steady_clock::now();
         if (save) std::cout << "[Annotate] Saved: " << filename << "\n";

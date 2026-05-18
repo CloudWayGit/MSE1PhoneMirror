@@ -16,6 +16,11 @@ struct Settings {
     // Screenshot behaviour
     bool screenshot_save_to_folder = true;
     bool screenshot_copy_to_clipboard = true;
+    // When true, every screenshot/annotated capture is opened in Snagit
+    // Editor (TechSmith Snagit must be installed). If the user disables
+    // "Save to folder" but keeps this on, the image is written to a temp
+    // file just so Snagit can pick it up.
+    bool screenshot_open_in_snagit = false;
 
     // Recording behaviour. format: 0 = MP4 (H.264), 1 = GIF.
     int  record_format = 0;

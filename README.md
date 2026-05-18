@@ -103,7 +103,7 @@ the phone.
 
 | Output | How |
 |--------|-----|
-| **Screenshot (PNG)** | `Ctrl+S`, or click the white circle in the menu/bezel. Saved to `Pictures\1PhoneMirror\` and/or copied to clipboard (toggle in Settings). |
+| **Screenshot (PNG)** | `Ctrl+S`, or click the white circle in the menu/bezel. Save to `Pictures\1PhoneMirror\`, copy to clipboard, and/or open directly in **Snagit Editor** (any combination, toggled in Settings). |
 | **Video (MP4)** | `Ctrl+R`, or click the red circle in the menu/bezel. H.264 via libx264, 30 fps by default. |
 | **Animated GIF** | Switch format in Settings → record as above. Auto-downscaled to 480 px wide. |
 | **Delayed recording** | Right-click the record button → **Start in 5 s**. Frosty countdown overlays the screen. |
@@ -137,6 +137,7 @@ button on the menu (or use the Windows file dialog) to open it.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **0.4.1** | 18.05.2026 | **Open screenshots in Snagit Editor** — new third output toggle alongside *Save to folder* and *Copy to clipboard*. Auto-detects any installed Snagit version (registry + Program Files); shows a warning toast if Snagit isn't installed when enabled. |
 | **0.4.0** | 18.05.2026 | **Multi-device keyboard switcher** (`Ctrl+1`…`Ctrl+9`) jumps between connected phones in the bottom-bezel picker. New **Always keep window on top** setting. AirPlay sources now label as **Apple 1/2/…** instead of *Device 1/2/…*. Tooltip shows the shortcut. |
 | **0.3.9** | 17.05.2026 | Small telemetry in settings. |
 | **0.3.8** | 16.05.2026 | Tuned for larger screens from macOS. Compact bezel icons, panels and overlays when mirroring iPad/Mac sources; window now reshapes when switching between connected devices. |

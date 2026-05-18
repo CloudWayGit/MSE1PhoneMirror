@@ -359,6 +359,7 @@ private:
     std::vector<std::pair<int /*preset_index*/, BtnRect>> settings_swatch_btns_;
     BtnRect settings_toggle_save_btn_;
     BtnRect settings_toggle_clip_btn_;
+    BtnRect settings_toggle_snagit_btn_;
     BtnRect settings_toggle_compname_btn_;
     BtnRect settings_toggle_aot_btn_;
     BtnRect settings_toggle_telemetry_btn_;

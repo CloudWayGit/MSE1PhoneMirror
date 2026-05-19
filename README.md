@@ -17,6 +17,8 @@ menu to disconnect.
 
 > 📖 Read the announcement on MSEndpointMgr: [1PhoneMirror – Free screen mirroring tool for Intune admins](https://msendpointmgr.com/2026/05/18/1phonemirror-free-screen-mirroring-tool-for-intune-admin/)
 
+> 🔏 Free code signing on Windows provided by [SignPath.io](https://signpath.io), certificate by the [SignPath Foundation](https://signpath.org). See the [signing policy](.signpath/signing-policy.md) and [GOVERNANCE.md](GOVERNANCE.md).
+
 ## Why 1PhoneMirror exists
 
 I build documentation and deliver training on managing Android and iOS

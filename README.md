@@ -50,6 +50,12 @@ guide, a Loop page, or a slide deck.
     <td><b>Settings panel</b> (<code>S</code>) — bezel colour swatches, screenshot/clipboard toggles, computer-name identity, and the MP4 / GIF recording-format selector.</td>
     <td><b>Log viewer</b> (<code>L</code>) — live activity drawer slides out to the right, perfect for debugging AirPlay handshakes or Android pairing.</td>
   </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/screenshots/05-Webcam-viewer-for-showing-phone-handling.png" height="280" alt="Webcam drawer for showing phone handling"></td>
+  </tr>
+  <tr>
+    <td colspan="2"><b>Webcam drawer</b> — pop out a live webcam feed alongside the mirrored phone to demonstrate hands-on gestures, taps, and physical buttons during demos or training sessions.</td>
+  </tr>
 </table>
 
 ## Architecture

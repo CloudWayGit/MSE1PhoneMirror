@@ -70,16 +70,31 @@ jobs:
             }
           }
 
-      - name: Submit manifest via winget-releaser
-        # Pin to the stable @v2 tag rather than @main. The `main` branch
-        # has a Windows path-join bug that constructs the upstream
-        # existence-check URL with a backslash ("manifests/m\Publisher/..."),
-        # which always 404s and aborts the run before any PR is opened.
-        uses: vedantmgoyal9/winget-releaser@v2
-        with:
-          identifier: MSEndpointMgr.1PhoneMirror
-          version: ${{ steps.ctx.outputs.version }}
-          installers-regex: '1PhoneMirror-.*\.msi$'
-          token: ${{ secrets.WINGET_TOKEN }}
-          release-repository: MSEndpointMgr/1PhoneMirror
-          release-tag: v${{ steps.ctx.outputs.version }}
+      - name: Submit manifest via wingetcreate
+        # The community `vedantmgoyal9/winget-releaser` action (both @main
+        # and @v2) constructs its existence-check URL with a literal
+        # backslash on Windows (`manifests/m\Publisher/...`), which 404s
+        # and aborts before any PR is opened. Replaced with the official
+        # Microsoft `wingetcreate` CLI, which is what most reliable winget
+        # publish pipelines use directly.
+        shell: pwsh
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          VERSION: ${{ steps.ctx.outputs.version }}
+          URL: ${{ steps.ctx.outputs.url }}
+        run: |
+          # Install wingetcreate via dotnet tool so it stays current.
+          dotnet tool install --global wingetcreate
+          if ($LASTEXITCODE -ne 0) { throw "wingetcreate install failed" }
+          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+          wingetcreate --version
+
+          # `update` automatically forks microsoft/winget-pkgs (if needed),
+          # commits the new version manifest, and opens a PR. `--submit`
+          # is required for it to actually open the PR.
+          wingetcreate update MSEndpointMgr.1PhoneMirror `
+            --version $env:VERSION `
+            --urls   $env:URL `
+            --submit `
+            --token  $env:WINGET_TOKEN
+          if ($LASTEXITCODE -ne 0) { throw "wingetcreate update failed (exit $LASTEXITCODE)" }

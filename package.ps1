@@ -31,28 +31,6 @@
     Optional path to IntuneWinAppUtil.exe. If found (or found on PATH), the
     MSI is wrapped into a .intunewin in dist\.
 
-.PARAMETER SubmitForSigning
-    Submit the final MSI to SignPath.io for code signing instead of (or in
-    addition to) signing locally with -SignCertThumbprint. Requires the
-    environment variable SIGNPATH_API_TOKEN, plus the parameters below.
-    On completion the signed MSI replaces the unsigned MSI at the same path.
-
-.PARAMETER SignPathOrgId
-    SignPath organisation GUID. Defaults to env:SIGNPATH_ORG_ID.
-
-.PARAMETER SignPathProjectSlug
-    SignPath project slug (e.g. "1PhoneMirror").
-    Defaults to env:SIGNPATH_PROJECT_SLUG or "1PhoneMirror".
-
-.PARAMETER SignPathPolicySlug
-    SignPath signing policy slug. Defaults to env:SIGNPATH_POLICY_SLUG
-    or "test" (so a local submission never accidentally requests the
-    production "release" policy).
-
-.PARAMETER SignPathApiBaseUrl
-    Override the SignPath API base URL (only needed for self-hosted SignPath
-    or non-default regions).
-
 .EXAMPLE
     .\package.ps1
     Build + stage + MSI.
@@ -60,11 +38,6 @@
 .EXAMPLE
     .\package.ps1 -SignCertThumbprint ABCDEF1234... -IntuneWinAppUtil C:\Tools\IntuneWinAppUtil.exe
     Full pipeline including signing and Intune packaging.
-
-.EXAMPLE
-    $env:SIGNPATH_API_TOKEN = '...'
-    .\package.ps1 -SubmitForSigning -SignPathOrgId <guid> -SignPathPolicySlug test
-    Build the MSI and submit it to SignPath.io (test policy) for signing.
 #>
 [CmdletBinding()]
 param(
@@ -72,12 +45,7 @@ param(
     [switch] $SkipBuild,
     [string] $SignCertThumbprint,
     [string] $TimestampUrl = 'http://timestamp.digicert.com',
-    [string] $IntuneWinAppUtil,
-    [switch] $SubmitForSigning,
-    [string] $SignPathOrgId        = $env:SIGNPATH_ORG_ID,
-    [string] $SignPathProjectSlug,
-    [string] $SignPathPolicySlug,
-    [string] $SignPathApiBaseUrl   = 'https://app.signpath.io/api/v1'
+    [string] $IntuneWinAppUtil
 )
 
 $ErrorActionPreference = 'Stop'
@@ -281,92 +249,6 @@ if ($LASTEXITCODE -ne 0) { throw "wix build failed (exit $LASTEXITCODE)" }
 
 # Sign the MSI itself.
 Invoke-Signtool $msi
-
-# ---------- 6b. Optional: submit to SignPath.io for signing ----------
-function Submit-ToSignPath {
-    param(
-        [Parameter(Mandatory)][string] $MsiPath,
-        [Parameter(Mandatory)][string] $OrgId,
-        [Parameter(Mandatory)][string] $ProjectSlug,
-        [Parameter(Mandatory)][string] $PolicySlug,
-        [Parameter(Mandatory)][string] $ApiBaseUrl,
-        [Parameter(Mandatory)][string] $ApiToken
-    )
-
-    Write-Host "==> Submitting $(Split-Path -Leaf $MsiPath) to SignPath ($PolicySlug policy)" -ForegroundColor Cyan
-    Write-Host "    Org=$OrgId Project=$ProjectSlug" -ForegroundColor DarkGray
-
-    $headers = @{ Authorization = "Bearer $ApiToken" }
-
-    # 1. POST a signing request (multipart with the artifact).
-    $submitUri = "$ApiBaseUrl/$OrgId/SigningRequests"
-    $form = @{
-        ProjectSlug         = $ProjectSlug
-        SigningPolicySlug   = $PolicySlug
-        Description         = "Local submission from package.ps1 ($(hostname))"
-        Artifact            = Get-Item $MsiPath
-    }
-    $resp = Invoke-RestMethod -Method Post -Uri $submitUri -Headers $headers -Form $form
-    $reqId = $resp.signingRequestId
-    if (-not $reqId) { throw "SignPath submit returned no signingRequestId: $($resp | ConvertTo-Json -Depth 4)" }
-    Write-Host "    Signing request id: $reqId" -ForegroundColor DarkGray
-    Write-Host "    Approve in the SignPath dashboard - polling for completion..."
-
-    # 2. Poll until terminal status.
-    $statusUri = "$ApiBaseUrl/$OrgId/SigningRequests/$reqId"
-    $terminal = @('Completed', 'Failed', 'Denied', 'Canceled')
-    $delaySec = 10
-    $maxMin   = 60
-    $deadline = (Get-Date).AddMinutes($maxMin)
-    do {
-        Start-Sleep -Seconds $delaySec
-        $info = Invoke-RestMethod -Method Get -Uri $statusUri -Headers $headers
-        $status = $info.status
-        Write-Host "    status: $status"
-        if ((Get-Date) -gt $deadline) {
-            throw "SignPath request $reqId did not complete within $maxMin minutes."
-        }
-    } until ($terminal -contains $status)
-
-    if ($status -ne 'Completed') {
-        throw "SignPath signing request ended with status '$status'."
-    }
-
-    # 3. Download the signed artifact and overwrite the local MSI.
-    $downloadUri = "$ApiBaseUrl/$OrgId/SigningRequests/$reqId/SignedArtifact"
-    $tmp = [System.IO.Path]::GetTempFileName()
-    Invoke-RestMethod -Method Get -Uri $downloadUri -Headers $headers -OutFile $tmp
-    Move-Item -Force $tmp $MsiPath
-    Write-Host "    Signed MSI written to $MsiPath" -ForegroundColor Green
-
-    $sig = Get-AuthenticodeSignature $MsiPath
-    Write-Host "    Authenticode status: $($sig.Status)"
-    Write-Host "    Signer subject     : $($sig.SignerCertificate.Subject)"
-    if ($sig.Status -ne 'Valid') {
-        throw "Signed MSI failed Authenticode verification: $($sig.Status)"
-    }
-}
-
-if ($SubmitForSigning) {
-    if (-not $env:SIGNPATH_API_TOKEN) {
-        throw "-SubmitForSigning requires env:SIGNPATH_API_TOKEN to be set."
-    }
-    if (-not $SignPathOrgId) {
-        throw "-SubmitForSigning requires -SignPathOrgId or env:SIGNPATH_ORG_ID."
-    }
-    if (-not $SignPathProjectSlug) {
-        $SignPathProjectSlug = if ($env:SIGNPATH_PROJECT_SLUG) { $env:SIGNPATH_PROJECT_SLUG } else { '1PhoneMirror' }
-    }
-    if (-not $SignPathPolicySlug) {
-        $SignPathPolicySlug = if ($env:SIGNPATH_POLICY_SLUG) { $env:SIGNPATH_POLICY_SLUG } else { 'test' }
-    }
-    Submit-ToSignPath -MsiPath $msi `
-        -OrgId       $SignPathOrgId `
-        -ProjectSlug $SignPathProjectSlug `
-        -PolicySlug  $SignPathPolicySlug `
-        -ApiBaseUrl  $SignPathApiBaseUrl `
-        -ApiToken    $env:SIGNPATH_API_TOKEN
-}
 
 Write-Host ""
 Write-Host "==> MSI ready: $msi" -ForegroundColor Green

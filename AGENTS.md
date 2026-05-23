@@ -36,6 +36,7 @@ a Release build before tagging.
 | [installer/](installer) | WiX 5 `.wxs` source + `THIRD_PARTY_LICENSES.txt`. |
 | [scripts/](scripts), [package.ps1](package.ps1) | Build + MSI/Intune packaging. |
 | [telemetry/](telemetry) | **Separate** .NET 8 Azure Functions project — deployed via `azd up`, not part of the C++ build. See [telemetry/README.md](telemetry/README.md). |
+| [signing/](signing) | **Separate** Azure Trusted Signing infra (Bicep, subscription-scope, plain `az deployment` — not `azd`). See [signing/README.md](signing/README.md). |
 | [manifests/](manifests) | winget manifest fork copy (publish via [.github/workflows/winget.yml](.github/workflows/winget.yml)). |
 | [docs/screenshots/](docs/screenshots) | README screenshots only. |
 
@@ -105,10 +106,9 @@ a Release build before tagging.
 ## Packaging & release
 
 - **MSI:** `.\package.ps1` — builds Release, stages DLLs + VC++ runtime,
-  invokes WiX 5, optionally signs. `-IntuneWinAppUtil <path>` wraps the MSI
-  for Intune. `-SubmitForSigning` posts to SignPath (see
-  [.signpath/signing-policy.md](.signpath/signing-policy.md) and
-  [GOVERNANCE.md](GOVERNANCE.md) — only the project lead approves).
+  invokes WiX 5, optionally signs via `-SignCertThumbprint` (local signtool).
+  `-IntuneWinAppUtil <path>` wraps the MSI for Intune. Releases are
+  currently published unsigned; see [GOVERNANCE.md](GOVERNANCE.md#release-signing).
 - **CI release:** push a `v*.*.*` tag on `main` → [.github/workflows/release.yml](.github/workflows/release.yml)
   builds + uploads the MSI as a GitHub Release asset.
 - **winget:** [.github/workflows/winget.yml](.github/workflows/winget.yml)

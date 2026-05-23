@@ -284,7 +284,7 @@ is still not approved — fall back to the manual routine.
 
 ## Optional improvements (later)
 
-- **Code signing** — adds an Authenticode signing step in `release.yml` before SHA computation. Requires a code-signing cert (DigiCert / Sectigo / SignPath community).
+- **Code signing** — adds an Authenticode signing step in `release.yml` before SHA computation. Requires a code-signing cert (Azure Trusted Signing, DigiCert, Sectigo, etc.).
 - **`vcpkg.json` manifest mode** — pins exact dependency versions for reproducible CI builds and tighter cache keys.
 - **Changelog file** — `CHANGELOG.md` consumed by `softprops/action-gh-release` for richer release notes.
 - **Pre-release channel** — push tags `v0.2.1-beta1`; gate winget submission on a non-prerelease check.

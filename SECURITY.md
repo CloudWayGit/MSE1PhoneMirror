@@ -38,24 +38,19 @@ You can expect:
   prepared and published, followed by public disclosure of the advisory
   once users have had a reasonable window to update.
 
-## Signed releases
+## Release integrity
 
-Starting with the first release published after onboarding to
-[SignPath.io](https://signpath.io)'s open-source code signing program,
-every official `1PhoneMirror-*.msi` published under
-`MSEndpointMgr/1PhoneMirror` is digitally signed by the SignPath
-Foundation certificate.
-
-Verify a downloaded MSI with PowerShell:
+Official `1PhoneMirror-*.msi` artifacts are currently **unsigned** while
+a code-signing certificate is being arranged. In the meantime, verify a
+downloaded MSI against the SHA-256 hash published on the corresponding
+GitHub Release page:
 
 ```powershell
-Get-AuthenticodeSignature .\1PhoneMirror-<version>.msi
+Get-FileHash .\1PhoneMirror-<version>.msi -Algorithm SHA256
 ```
 
-The `SignerCertificate.Subject` should reference *SignPath Foundation*
-and the status should be `Valid`. If the status is anything else
-(`HashMismatch`, `NotSigned`, …), do not run the installer and please
-report it via the channels above.
+If the hash does not match the value listed on the release page, do not
+run the installer and please report it via the channels above.
 
 ## Scope
 

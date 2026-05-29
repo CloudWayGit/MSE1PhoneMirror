@@ -1,4 +1,4 @@
-# 1PhoneMirror
+# 1PhoneMirrors
 
 An open-source screen-mirroring receiver for Windows that lets an iPhone or
 an Android phone show up inside a phone-shaped window on your PC — no app
